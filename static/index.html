@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Church Service Audio Splitter</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-group">
+        <div class="logo-icon">⛪</div>
+        <div>
+          <h1>Church Audio Splitter</h1>
+          <p class="subtitle">Lossless FFmpeg stream cutting & Whisper speech density detection</p>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span class="badge badge-tech">FFmpeg Lossless (-c copy)</span>
+        <span class="badge badge-whisper">OpenAI Whisper VAD</span>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <!-- Section 1: File & Settings -->
+      <section class="card config-card">
+        <h2>1. Audio Source & Settings</h2>
+        <div class="form-grid">
+          <div class="form-group full-width">
+            <label for="audioPath">Audio File Path (.wav or .mp3):</label>
+            <div class="input-with-action">
+              <input type="text" id="audioPath" placeholder="C:\Audio\Sunday_Service_2026-10-04.mp3" />
+              <button class="btn btn-secondary" id="browseFileBtn" onclick="triggerFileUpload()">Choose File...</button>
+              <input type="file" id="hiddenFileInput" accept=".mp3,.wav,.m4a,.aac,.flac" style="display:none;" />
+            </div>
+            <span class="hint">Enter local full path or choose a file from your computer</span>
+          </div>
+
+          <div class="form-group full-width">
+            <label for="outputDir">Output Destination Directory:</label>
+            <input type="text" id="outputDir" placeholder="Auto-created in source folder (or enter custom folder path)" />
+            <span class="hint">Where separated Worship Music & Sermon files will be saved</span>
+          </div>
+
+          <div class="form-group">
+            <label for="modelSize">Whisper Model:</label>
+            <select id="modelSize">
+              <option value="tiny">Tiny (Fastest, ~10x speed)</option>
+              <option value="base" selected>Base (Recommended - Fast & Accurate)</option>
+              <option value="small">Small (Higher precision)</option>
+              <option value="medium">Medium (Maximum speech detail)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="minSermonMin">Min Sermon Duration (minutes):</label>
+            <input type="number" id="minSermonMin" value="10" min="2" max="120" step="1" />
+          </div>
+
+          <div class="form-group">
+            <label for="densityThreshold">Speech Density Sensitivity:</label>
+            <select id="densityThreshold">
+              <option value="0.45">High Sensitivity (0.45)</option>
+              <option value="0.55" selected>Standard (0.55)</option>
+              <option value="0.65">Strict Continuous Speech (0.65)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="paddingSec">Boundary Cushion (seconds):</label>
+            <input type="number" id="paddingSec" value="2.0" min="0" max="10" step="0.5" />
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="btn btn-primary" id="analyzeBtn" onclick="startAnalysis()">
+            <span id="analyzeBtnText">⚡ Analyze & Detect Sermon</span>
+          </button>
+        </div>
+
+        <!-- Progress Tracker -->
+        <div id="progressContainer" class="progress-box hidden">
+          <div class="progress-header">
+            <span id="progressStatus">Analyzing audio...</span>
+            <span id="progressPercent">0%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div id="progressBarFill" class="progress-bar-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 2: Interactive Timeline & Speech Density -->
+      <section class="card results-card hidden" id="resultsSection">
+        <div class="section-title-row">
+          <h2>2. Detected Service Structure & Density Timeline</h2>
+          <span class="confidence-badge" id="confidenceBadge">Confidence: 94%</span>
+        </div>
+
+        <div class="timeline-container">
+          <div class="timeline-legend">
+            <div class="legend-item"><span class="legend-color worship-color"></span> Opening Worship</div>
+            <div class="legend-item"><span class="legend-color sermon-color"></span> Sermon (Continuous Speech)</div>
+            <div class="legend-item"><span class="legend-color closing-color"></span> Closing / Response Worship</div>
+          </div>
+
+          <!-- Canvas for speech density profile -->
+          <div class="canvas-wrapper">
+            <canvas id="densityCanvas" height="130"></canvas>
+          </div>
+          
+          <div class="timeline-ruler" id="timelineRuler">
+            <span>0:00</span>
+            <span id="rulerMid">30:00</span>
+            <span id="rulerEnd">1:00:00</span>
+          </div>
+        </div>
+
+        <!-- Fine-tuning Timestamps -->
+        <div class="bounds-adjust-grid">
+          <div class="bound-card">
+            <h3>📖 Sermon Start</h3>
+            <div class="time-input-group">
+              <input type="text" id="sermonStartInput" class="time-input" value="00:18:45" />
+              <div class="quick-adjust">
+                <button class="btn-micro" onclick="adjustTime('start', -5)">-5s</button>
+                <button class="btn-micro" onclick="adjustTime('start', -1)">-1s</button>
+                <button class="btn-micro" onclick="adjustTime('start', 1)">+1s</button>
+                <button class="btn-micro" onclick="adjustTime('start', 5)">+5s</button>
+              </div>
+            </div>
+            <button class="btn btn-small btn-listen" onclick="previewAt('start')">🎧 Listen Start Transition</button>
+          </div>
+
+          <div class="bound-card">
+            <h3>📖 Sermon End</h3>
+            <div class="time-input-group">
+              <input type="text" id="sermonEndInput" class="time-input" value="00:54:30" />
+              <div class="quick-adjust">
+                <button class="btn-micro" onclick="adjustTime('end', -5)">-5s</button>
+                <button class="btn-micro" onclick="adjustTime('end', -1)">-1s</button>
+                <button class="btn-micro" onclick="adjustTime('end', 1)">+1s</button>
+                <button class="btn-micro" onclick="adjustTime('end', 5)">+5s</button>
+              </div>
+            </div>
+            <button class="btn btn-small btn-listen" onclick="previewAt('end')">🎧 Listen End Transition</button>
+          </div>
+
+          <div class="summary-card">
+            <h3>Calculated Split Durations</h3>
+            <div class="duration-row">
+              <span>🎵 Opening Worship:</span> <strong id="durWorship1">18m 45s</strong>
+            </div>
+            <div class="duration-row">
+              <span>📖 Sermon:</span> <strong id="durSermon" class="highlight-sermon">35m 45s</strong>
+            </div>
+            <div class="duration-row">
+              <span>🎵 Closing Worship:</span> <strong id="durWorship2">7m 30s</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Built-in Audio Player Preview -->
+        <div class="audio-player-container" id="playerContainer">
+          <audio id="audioPreview" controls></audio>
+        </div>
+
+        <!-- Export Configuration -->
+        <div class="export-options">
+          <label class="checkbox-container">
+            <input type="checkbox" id="combineWorshipCheck" />
+            <span class="checkmark"></span>
+            Also create a single combined <strong>Full Worship Music</strong> file (joining opening & closing worship)
+          </label>
+          <label class="checkbox-container">
+            <input type="checkbox" id="exportTranscriptCheck" checked />
+            <span class="checkmark"></span>
+            Export Sermon Text Transcript (.txt)
+          </label>
+        </div>
+
+        <div class="action-bar">
+          <button class="btn btn-success btn-large" id="exportBtn" onclick="runLosslessExport()">
+            <span id="exportBtnText">✂️ Execute Lossless Split (-c copy)</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Section 3: Export Results & Transcript -->
+      <section class="card output-card hidden" id="outputSection">
+        <h2>3. Generated Files</h2>
+        <p class="success-message">✓ Split completed losslessly without re-encoding! Original audio quality preserved.</p>
+        <div class="files-list" id="filesList">
+          <!-- Populated by JS -->
+        </div>
+
+        <!-- Collapsible Transcript Viewer -->
+        <div class="transcript-box">
+          <div class="transcript-header" onclick="toggleTranscript()">
+            <h3>📝 Sermon Transcript</h3>
+            <span id="transcriptToggleIcon">▼</span>
+          </div>
+          <div class="transcript-body hidden" id="transcriptBody">
+            <pre id="transcriptText"></pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <p>Church Audio Splitter &bull; Lossless FFmpeg Stream Preservation &bull; Local & Offline</p>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
