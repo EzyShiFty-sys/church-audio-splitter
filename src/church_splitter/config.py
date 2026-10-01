@@ -3,6 +3,8 @@ import shutil
 import sys
 from pathlib import Path
 
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
 DEFAULT_MODEL_SIZE = "base"  # "tiny", "base", "small", "medium"
 DEFAULT_WINDOW_SECONDS = 180  # 3-minute sliding window for density calculation
 DEFAULT_MIN_SERMON_MINUTES = 10.0  # Minimum sermon length in minutes

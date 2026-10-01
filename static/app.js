@@ -182,6 +182,7 @@ function renderResults(result) {
 
   updateCalculatedDurations();
   drawDensityTimeline();
+  renderTracks();
 
   // If transcript available, display it
   if (result.sermon_transcript) {
@@ -402,3 +403,164 @@ window.addEventListener('resize', () => {
     drawDensityTimeline();
   }
 });
+
+// --- Multi-Track Service Builder Logic ---
+let customTracks = [];
+
+function renderTracks() {
+  const tbody = document.getElementById('tracksTableBody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (customTracks.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: #94a3b8; padding: 20px;">No custom tracks added yet. Click <strong>🪄 Pre-Fill Service Tracks</strong> or <strong>+ Add Track</strong> above.</td></tr>`;
+    return;
+  }
+
+  customTracks.forEach((t, i) => {
+    const durSec = Math.max(0, t.end - t.start);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="color: #64748b; font-weight: 600;">${i + 1}</td>
+      <td>
+        <input type="text" value="${t.label}" onchange="updateTrack(${i}, 'label', this.value)" />
+      </td>
+      <td>
+        <input type="text" class="time-input" value="${formatTime(t.start)}" onchange="updateTrack(${i}, 'start', this.value)" />
+      </td>
+      <td>
+        <input type="text" class="time-input" value="${formatTime(t.end)}" onchange="updateTrack(${i}, 'end', this.value)" />
+      </td>
+      <td style="font-family: var(--font-mono); color: #38bdf8;">${formatDuration(durSec)}</td>
+      <td>
+        <button class="btn-track-play" onclick="previewTrack(${i})" title="Play this track">▶ Play</button>
+      </td>
+      <td>
+        <button class="btn-delete" onclick="deleteTrack(${i})" title="Remove track">✕</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function updateTrack(index, field, val) {
+  if (field === 'start') {
+    customTracks[index].start = parseTime(val);
+  } else if (field === 'end') {
+    customTracks[index].end = parseTime(val);
+  } else if (field === 'label') {
+    customTracks[index].label = val.trim();
+  }
+  renderTracks();
+}
+
+function addNewTrack(label = "", start = 0, end = 0) {
+  if (!label) {
+    const lastEnd = customTracks.length > 0 ? customTracks[customTracks.length - 1].end : 0;
+    start = lastEnd;
+    end = Math.min(currentDuration || (start + 300), start + 300);
+    label = `Track ${customTracks.length + 1}`;
+  }
+  customTracks.push({ label, start, end });
+  renderTracks();
+}
+
+function deleteTrack(index) {
+  customTracks.splice(index, 1);
+  renderTracks();
+}
+
+function previewTrack(index) {
+  const t = customTracks[index];
+  if (!t) return;
+  const audioEl = document.getElementById('audioPreview');
+  audioEl.currentTime = t.start;
+  audioEl.play();
+}
+
+function prefillRevivalTracks() {
+  customTracks = [
+    { label: "Worship Song 1 (God Will Make A Way)", start: 0, end: 277 },
+    { label: "Worship Song 2", start: 277, end: 743 },
+    { label: "Worship Song 3", start: 743, end: 955 },
+    { label: "Worship Song 4", start: 955, end: 1590 },
+    { label: "Worship Song 5", start: 1590, end: 1970 },
+    { label: "Worship Song 6", start: 1970, end: 2525 },
+    { label: "Worship Song 7 / Congregational Praise", start: 2525, end: 3954 },
+    { label: "Preaching Part 1 (Matthew 6 - One Look)", start: 3954, end: 6136 },
+    { label: "Altar Call Worship & Prayer", start: 6136, end: 6797 },
+    { label: "Preaching Part 2 (Spirit-Led Exhortation)", start: 6797, end: 8159 },
+    { label: "Testimonies & Closing Prayer", start: 8159, end: currentDuration || 10583 }
+  ];
+  renderTracks();
+}
+
+async function autoDetectWorshipSongs() {
+  const audioPath = document.getElementById('audioPath').value.trim();
+  if (!audioPath) {
+    alert('Please enter or upload an audio file first.');
+    return;
+  }
+  const preachingStart = parseTime(document.getElementById('sermonStartInput').value) || 3954;
+  try {
+    const res = await fetch('/api/detect-songs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio_path: audioPath, worship_end: preachingStart })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    if (data.songs && data.songs.length > 0) {
+      customTracks = data.songs.map(s => ({
+        label: s.label,
+        start: s.start,
+        end: s.end
+      }));
+      customTracks.push({
+        label: "Preaching Part 1",
+        start: preachingStart,
+        end: parseTime(document.getElementById('sermonEndInput').value) || (preachingStart + 2100)
+      });
+      renderTracks();
+    }
+  } catch (err) {
+    alert('Auto song detection error: ' + err.message);
+  }
+}
+
+async function exportCustomTracks() {
+  const audioPath = document.getElementById('audioPath').value.trim();
+  const outputDir = document.getElementById('outputDir').value.trim();
+  if (!audioPath || !outputDir) {
+    alert('Please specify the audio file path and output folder.');
+    return;
+  }
+  if (customTracks.length === 0) {
+    alert('Please add or pre-fill at least one track.');
+    return;
+  }
+
+  const exportBtn = document.getElementById('exportTracksBtn');
+  exportBtn.disabled = true;
+  document.getElementById('exportTracksBtnText').innerText = 'Cutting Tracks Losslessly (-c copy)...';
+
+  try {
+    const res = await fetch('/api/export-tracks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audio_path: audioPath,
+        output_dir: outputDir,
+        tracks: customTracks
+      })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    renderExportResults(data);
+  } catch (err) {
+    alert('Export error: ' + err.message);
+  } finally {
+    exportBtn.disabled = false;
+    document.getElementById('exportTracksBtnText').innerText = '✂️ Export All Tracks Losslessly (-c copy)';
+  }
+}

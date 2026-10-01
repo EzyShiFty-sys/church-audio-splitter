@@ -527,6 +527,110 @@ pre {
   display: none !important;
 }
 
+/* Multi-track table styles */
+.tracks-card {
+  margin-top: 24px;
+  background: #1e293b;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.tracks-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--card-border);
+  padding-bottom: 12px;
+}
+
+.section-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.tracks-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tracks-table-wrapper {
+  overflow-x: auto;
+}
+
+.tracks-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.tracks-table th {
+  text-align: left;
+  padding: 10px 12px;
+  background: #0f172a;
+  color: var(--text-secondary);
+  font-weight: 600;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.tracks-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #334155;
+  vertical-align: middle;
+}
+
+.tracks-table input[type="text"] {
+  width: 100%;
+  background: #0f172a;
+  border: 1px solid #475569;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.88rem;
+}
+
+.tracks-table input.time-input {
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  text-align: center;
+}
+
+.btn-delete {
+  background: #7f1d1d;
+  color: #fecaca;
+  border: 1px solid #b91c1c;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.btn-delete:hover {
+  background: #991b1b;
+}
+
+.btn-track-play {
+  background: #312e81;
+  color: #c7d2fe;
+  border: 1px solid #4338ca;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-track-play:hover {
+  background: #3730a3;
+}
+
 /* Footer */
 .app-footer {
   text-align: center;

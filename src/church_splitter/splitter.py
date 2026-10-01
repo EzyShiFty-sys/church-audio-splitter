@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 from church_splitter.speech_analyzer import ChurchAudioAnalyzer, SermonDetectionResult
-from church_splitter.ffmpeg_utils import lossless_cut, lossless_concat, get_audio_info
+from church_splitter.ffmpeg_utils import lossless_cut, lossless_concat, get_audio_info, detect_silence_pauses
 
 def format_timestamp(seconds: float) -> str:
     """Formats seconds into HH:MM:SS or MM:SS."""
@@ -170,6 +170,113 @@ class ChurchAudioSplitter:
             "sermon_start_seconds": sermon_start,
             "sermon_end_seconds": sermon_end,
             "sermon_formatted_range": f"{format_timestamp(sermon_start)} - {format_timestamp(sermon_end)}",
+            "files": created_files
+        }
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary_data, f, indent=2)
+
+        return summary_data
+
+    def detect_worship_songs(
+        self,
+        audio_path: str | Path,
+        worship_end_sec: float,
+        min_song_seconds: float = 90.0,
+        noise_db: float = -28.0,
+        min_silence_duration: float = 2.5
+    ) -> List[Dict[str, Any]]:
+        """
+        Detects individual worship songs between 0:00 and worship_end_sec
+        by locating substantial pauses/silences between songs.
+        """
+        pauses = detect_silence_pauses(
+            audio_path=audio_path,
+            start_sec=0.0,
+            duration_sec=worship_end_sec,
+            noise_db=noise_db,
+            min_silence_duration=min_silence_duration
+        )
+
+        # Filter pauses that are at least min_song_seconds apart
+        split_points = [0.0]
+        for p in pauses:
+            pause_center = (p["start"] + p["end"]) / 2.0
+            if pause_center - split_points[-1] >= min_song_seconds and (worship_end_sec - pause_center) >= min_song_seconds:
+                split_points.append(round(pause_center, 1))
+        split_points.append(round(worship_end_sec, 1))
+
+        songs = []
+        for i in range(len(split_points) - 1):
+            s_start = split_points[i]
+            s_end = split_points[i+1]
+            songs.append({
+                "label": f"Worship Song {i+1}",
+                "start": s_start,
+                "end": s_end,
+                "duration": s_end - s_start,
+                "formatted_range": f"{format_timestamp(s_start)} - {format_timestamp(s_end)}"
+            })
+        return songs
+
+    def export_custom_tracks(
+        self,
+        input_audio_path: str | Path,
+        output_dir: str | Path,
+        tracks: List[Dict[str, Any]],
+        custom_base_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Losslessly cuts an arbitrary list of custom labeled tracks/segments
+        (e.g. Worship Song 1, Song 2, Preaching Part 1, Altar Call, Preaching Part 2, Testimonies).
+        """
+        input_audio_path = Path(input_audio_path).resolve()
+        output_dir = Path(output_dir).resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        info = get_audio_info(input_audio_path)
+        total_duration = info["duration"]
+        ext = input_audio_path.suffix.lower()
+        base_name = custom_base_name or input_audio_path.stem
+
+        created_files: List[Dict[str, Any]] = []
+
+        for idx, track in enumerate(tracks, start=1):
+            label = track.get("label", f"Track_{idx}").strip()
+            # sanitize filename
+            safe_label = "".join(c if (c.isalnum() or c in " -_()") else "_" for c in label).strip()
+            start_sec = max(0.0, float(track.get("start", 0.0)))
+            end_sec = min(total_duration, float(track.get("end", total_duration)))
+
+            if end_sec <= start_sec:
+                continue
+
+            out_filename = f"{base_name}_{idx:02d}_{safe_label}{ext}"
+            out_path = output_dir / out_filename
+
+            lossless_cut(
+                input_path=input_audio_path,
+                output_path=out_path,
+                start_sec=start_sec,
+                end_sec=end_sec
+            )
+
+            created_files.append({
+                "track_number": idx,
+                "label": label,
+                "filename": out_filename,
+                "path": str(out_path),
+                "start": start_sec,
+                "end": end_sec,
+                "duration": end_sec - start_sec,
+                "formatted_range": f"{format_timestamp(start_sec)} - {format_timestamp(end_sec)}"
+            })
+
+        summary_filename = f"{base_name}_tracks_summary.json"
+        summary_path = output_dir / summary_filename
+        summary_data = {
+            "source_file": str(input_audio_path),
+            "source_duration_seconds": total_duration,
+            "total_tracks": len(created_files),
             "files": created_files
         }
         with open(summary_path, "w", encoding="utf-8") as f:

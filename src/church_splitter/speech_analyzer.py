@@ -111,49 +111,53 @@ class ChurchAudioAnalyzer:
             if progress_callback:
                 progress_callback(0.20, "Transcribing and detecting speech timestamps...")
 
-            try:
-                segments_raw, info_whisper = model.transcribe(
-                    tmp_wav_path,
-                    beam_size=3,
-                    word_timestamps=True,
-                    vad_filter=True,
-                    vad_parameters=dict(
-                        min_silence_duration_ms=500,
-                        speech_pad_ms=200
-                    )
-                )
-                # Force evaluation of first item to catch lazy CUDA loading errors
-                segments_list = []
-                for seg in segments_raw:
-                    segments_list.append(seg)
-            except Exception as e:
-                # If CUDA runtime failed (e.g. missing cublas64_12.dll), recreate on CPU
-                if "cublas" in str(e).lower() or "cuda" in str(e).lower():
-                    self._model = WhisperModel(
-                        self.model_size,
-                        device="cpu",
-                        compute_type="int8",
-                        cpu_threads=os.cpu_count() or 4
-                    )
-                    model = self._model
-                    segments_raw, info_whisper = model.transcribe(
+            def get_transcribe_iterator():
+                nonlocal model
+                try:
+                    seg_iter, _ = model.transcribe(
                         tmp_wav_path,
-                        beam_size=3,
-                        word_timestamps=True,
+                        beam_size=1,
+                        word_timestamps=False,
                         vad_filter=True,
                         vad_parameters=dict(
                             min_silence_duration_ms=500,
                             speech_pad_ms=200
                         )
                     )
-                    segments_list = list(segments_raw)
-                else:
+                    first_item = next(seg_iter, None)
+                    return seg_iter, first_item
+                except Exception as e:
+                    # If CUDA runtime failed (e.g. missing cublas64_12.dll), recreate on CPU
+                    if "cublas" in str(e).lower() or "cuda" in str(e).lower():
+                        self._model = WhisperModel(
+                            self.model_size,
+                            device="cpu",
+                            compute_type="int8",
+                            cpu_threads=os.cpu_count() or 4
+                        )
+                        model = self._model
+                        seg_iter, _ = model.transcribe(
+                            tmp_wav_path,
+                            beam_size=1,
+                            word_timestamps=False,
+                            vad_filter=True,
+                            vad_parameters=dict(
+                                min_silence_duration_ms=500,
+                                speech_pad_ms=200
+                            )
+                        )
+                        first_item = next(seg_iter, None)
+                        return seg_iter, first_item
                     raise e
+
+            seg_iter, first_item = get_transcribe_iterator()
+            import itertools
+            raw_stream = itertools.chain([first_item] if first_item is not None else [], seg_iter)
 
             speech_segments: List[SpeechSegment] = []
             all_text_parts: List[str] = []
 
-            for seg in segments_list:
+            for seg in raw_stream:
                 cleaned_text = seg.text.strip()
                 words = cleaned_text.split()
                 speech_segments.append(
@@ -171,7 +175,10 @@ class ChurchAudioAnalyzer:
 
                 if progress_callback and total_duration > 0:
                     current_pct = 0.20 + min(0.65, (seg.end / total_duration) * 0.65)
-                    progress_callback(current_pct, f"Analyzing speech: {int(seg.end//60)}m / {int(total_duration//60)}m...")
+                    mins_done = int(seg.end // 60)
+                    mins_total = int(total_duration // 60)
+                    pct_done = int((seg.end / total_duration) * 100)
+                    progress_callback(current_pct, f"Transcribing speech: {mins_done}m / {mins_total}m ({pct_done}% of audio)...")
 
         finally:
             if os.path.exists(tmp_wav_path):
@@ -243,7 +250,8 @@ class ChurchAudioAnalyzer:
         padding_seconds: float
     ) -> Tuple[List[Dict[str, float]], float, float, float]:
         """
-        Uses sliding window active-speech density and contiguous sustained region detection.
+        Uses cadence-weighted sliding window active-speech density and contiguous
+        sustained region detection to separate singing worship music from spoken preaching.
         """
         duration_int = int(np.ceil(total_duration))
         if duration_int <= 0:
@@ -255,19 +263,28 @@ class ChurchAudioAnalyzer:
         for seg in speech_segments:
             s_idx = max(0, int(np.floor(seg.start)))
             e_idx = min(duration_int, int(np.ceil(seg.end)))
-            if e_idx > s_idx:
-                speech_mask[s_idx:e_idx] = 1.0
-                seg_dur = seg.end - seg.start
-                if seg_dur > 0:
-                    words_per_sec[s_idx:e_idx] += (seg.words_count / seg_dur)
+            dur = seg.end - seg.start
+            words = seg.words_count
+            if dur > 0 and words > 0 and e_idx > s_idx:
+                wps = words / dur
+                # Speaking rate: 1.5 - 4.0 words/sec; worship singing: < 0.6 words/sec
+                # Realistic speaking time: max ~0.45s per word
+                speech_time = min(dur, words * 0.45)
+                activity_ratio = min(1.0, speech_time / dur)
+                cadence_factor = float(np.clip((wps - 0.4) / 1.0, 0.05, 1.0))
+                seg_intensity = activity_ratio * cadence_factor
 
-        # Sliding window rolling density
+                speech_mask[s_idx:e_idx] = np.maximum(speech_mask[s_idx:e_idx], seg_intensity)
+                words_per_sec[s_idx:e_idx] = np.maximum(words_per_sec[s_idx:e_idx], wps)
+
+        # Sliding window rolling density (180s default)
         win_size = max(10, int(window_seconds))
-        # Use uniform 1D convolution
         kernel = np.ones(win_size) / win_size
-        density_profile = np.convolve(speech_mask, kernel, mode="same")
+        raw_density = np.convolve(speech_mask, kernel, mode="same")
+        # Normalize: continuous speech (~0.45 raw intensity) maps cleanly to ~1.0, worship singing to ~0.0-0.1
+        density_profile = np.clip(raw_density / 0.45, 0.0, 1.0)
 
-        # Downsample density timeline for visualization (e.g. 5-second steps)
+        # Downsample density timeline for UI visualization
         timeline_density: List[Dict[str, float]] = []
         step = 5
         for t in range(0, duration_int, step):
@@ -277,65 +294,55 @@ class ChurchAudioAnalyzer:
                 "words_per_sec": float(round(words_per_sec[t], 2))
             })
 
-        # Find high-density contiguous blocks
-        # 1. Active speech regions bridged by gap_tolerance
-        bridged_speech_mask = speech_mask.copy()
-        gap_limit = int(gap_tolerance)
-        last_speech = -1
+        # Find candidate blocks where density meets sensitivity threshold
+        effective_thresh = max(0.20, density_threshold * 0.7)
+        active_mask = (density_profile >= effective_thresh).astype(int)
+
+        # Bridge pauses within preaching up to gap_tolerance seconds
+        gap_limit = max(15, int(gap_tolerance))
+        last_active = -1
+        bridged_speech_mask = active_mask.copy()
         for i in range(duration_int):
-            if speech_mask[i] > 0:
-                if last_speech != -1 and (i - last_speech) <= gap_limit:
-                    bridged_speech_mask[last_speech:i] = 1.0
-                last_speech = i
+            if active_mask[i] == 1:
+                if last_active != -1 and (i - last_active) <= gap_limit:
+                    bridged_speech_mask[last_active:i] = 1
+                last_active = i
 
-        # 2. Extract contiguous candidate regions
-        candidates = []
-        in_region = False
-        r_start = 0
+        # Extract contiguous candidate regions
+        changes = np.diff(bridged_speech_mask)
+        starts = np.where(changes == 1)[0] + 1
+        ends = np.where(changes == -1)[0] + 1
+        if bridged_speech_mask[0] == 1:
+            starts = np.insert(starts, 0, 0)
+        if bridged_speech_mask[-1] == 1:
+            ends = np.append(ends, duration_int)
 
-        for i in range(duration_int):
-            # Check if this point is in high speech density or bridged speech
-            is_active = (density_profile[i] >= density_threshold) or (bridged_speech_mask[i] > 0 and density_profile[i] >= (density_threshold * 0.7))
-            if is_active and not in_region:
-                in_region = True
-                r_start = i
-            elif not is_active and in_region:
-                in_region = False
-                r_end = i
-                candidates.append((r_start, r_end))
-        if in_region:
-            candidates.append((r_start, duration_int))
-
-        # Filter candidates by minimum sermon duration
         min_sermon_secs = min_sermon_minutes * 60.0
         valid_candidates = []
-        for cs, ce in candidates:
+        for cs, ce in zip(starts, ends):
             dur = ce - cs
             if dur >= min_sermon_secs:
-                avg_density = np.mean(density_profile[cs:ce])
+                avg_density = float(np.mean(density_profile[cs:ce]))
                 valid_candidates.append((cs, ce, dur, avg_density))
 
         # If no single candidate meets the full minimum, pick the longest sustained block
-        if not valid_candidates and candidates:
-            # Sort by duration
-            sorted_cands = sorted(candidates, key=lambda c: (c[1] - c[0]), reverse=True)
-            best_c = sorted_cands[0]
-            valid_candidates.append((best_c[0], best_c[1], best_c[1] - best_c[0], float(np.mean(density_profile[best_c[0]:best_c[1]]))))
+        if not valid_candidates and len(starts) > 0:
+            all_cands = [(s, e, e - s, float(np.mean(density_profile[s:e]))) for s, e in zip(starts, ends)]
+            sorted_cands = sorted(all_cands, key=lambda c: c[2], reverse=True)
+            valid_candidates.append(sorted_cands[0])
 
         if not valid_candidates:
-            # Fallback: take the center 50% of the service if nothing detected
+            # Fallback: center 50%
             fallback_start = total_duration * 0.25
             fallback_end = total_duration * 0.75
             return timeline_density, fallback_start, fallback_end, 0.30
 
-        # Choose the candidate with highest score (combining duration and speech density)
-        # Score = duration * (avg_density ** 1.5)
+        # Choose the candidate with highest sustained preaching score
         best_candidate = max(valid_candidates, key=lambda x: x[2] * (x[3] ** 1.5))
         raw_start, raw_end, cand_dur, cand_density = best_candidate
 
-        # Refine start and end by matching actual speech segments near raw_start and raw_end
-        # Find first speech segment >= raw_start - 30s
-        matched_segs = [s for s in speech_segments if s.end >= (raw_start - 30) and s.start <= (raw_end + 30)]
+        # Refine boundaries against actual speech segments near raw_start and raw_end
+        matched_segs = [s for s in speech_segments if s.end >= (raw_start - 30) and s.start <= (raw_end + 30) and s.words_count >= 3]
         if matched_segs:
             refined_start = max(0.0, matched_segs[0].start - padding_seconds)
             refined_end = min(total_duration, matched_segs[-1].end + padding_seconds)

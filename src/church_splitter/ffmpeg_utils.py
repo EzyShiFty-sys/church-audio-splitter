@@ -133,3 +133,41 @@ def lossless_concat(input_paths: List[str | Path], output_path: str | Path) -> N
     finally:
         if os.path.exists(temp_list_path):
             os.remove(temp_list_path)
+
+def detect_silence_pauses(
+    audio_path: str | Path,
+    start_sec: float = 0.0,
+    duration_sec: Optional[float] = None,
+    noise_db: float = -28.0,
+    min_silence_duration: float = 2.0
+) -> List[Dict[str, float]]:
+    """Detects pause/silence intervals using FFmpeg silencedetect."""
+    import re
+    ffmpeg_bin = find_ffmpeg()
+    cmd = [ffmpeg_bin]
+    if start_sec > 0:
+        cmd.extend(["-ss", f"{start_sec:.2f}"])
+    if duration_sec:
+        cmd.extend(["-t", f"{duration_sec:.2f}"])
+    cmd.extend([
+        "-i", str(Path(audio_path).resolve()),
+        "-af", f"silencedetect=noise={noise_db}dB:d={min_silence_duration}",
+        "-f", "null",
+        "-"
+    ])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    pauses = []
+    current_start = None
+    for line in result.stderr.splitlines():
+        if "silence_start:" in line:
+            m = re.search(r"silence_start:\s*([\d\.]+)", line)
+            if m:
+                current_start = float(m.group(1)) + start_sec
+        elif "silence_end:" in line and current_start is not None:
+            m = re.search(r"silence_end:\s*([\d\.]+)\s*\|\s*silence_duration:\s*([\d\.]+)", line)
+            if m:
+                end_t = float(m.group(1)) + start_sec
+                dur = float(m.group(2))
+                pauses.append({"start": current_start, "end": end_t, "duration": dur})
+            current_start = None
+    return pauses

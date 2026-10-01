@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
@@ -26,6 +26,21 @@ class AnalyzeRequest(BaseModel):
     density_threshold: float = 0.55
     gap_tolerance: float = 45.0
     padding_seconds: float = 2.0
+
+class TrackItem(BaseModel):
+    label: str
+    start: float
+    end: float
+
+class MultiTrackExportRequest(BaseModel):
+    audio_path: str
+    output_dir: str
+    tracks: List[TrackItem]
+    custom_base_name: Optional[str] = None
+
+class DetectSongsRequest(BaseModel):
+    audio_path: str
+    worship_end: float = 3954.0
 
 class ExportRequest(BaseModel):
     audio_path: str
@@ -113,10 +128,13 @@ async def analyze_audio(req: AnalyzeRequest, background_tasks: BackgroundTasks):
                 "confidence": res.confidence,
                 "worship_segments": res.worship_segments,
                 "timeline_density": res.timeline_density,
+                "segments": res.segments,
                 "transcript_text": res.transcript_text,
                 "sermon_transcript": res.sermon_transcript
             }
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             analysis_jobs[job_id]["status"] = "failed"
             analysis_jobs[job_id]["error"] = str(e)
 
@@ -150,6 +168,41 @@ async def export_audio(req: ExportRequest):
         )
         return summary
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/detect-songs")
+async def detect_songs_endpoint(req: DetectSongsRequest):
+    p = Path(req.audio_path)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    try:
+        splitter = ChurchAudioSplitter()
+        songs = splitter.detect_worship_songs(p, worship_end_sec=req.worship_end)
+        return {"songs": songs}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/export-tracks")
+async def export_tracks_endpoint(req: MultiTrackExportRequest):
+    input_path = Path(req.audio_path)
+    if not input_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    output_dir = Path(req.output_dir)
+    try:
+        splitter = ChurchAudioSplitter()
+        tracks_data = [t.dict() for t in req.tracks]
+        summary = splitter.export_custom_tracks(
+            input_audio_path=input_path,
+            output_dir=output_dir,
+            tracks=tracks_data,
+            custom_base_name=req.custom_base_name
+        )
+        return summary
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/audio-stream")

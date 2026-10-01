@@ -184,9 +184,49 @@
           </label>
         </div>
 
-        <div class="action-bar">
+        <!-- Multi-Track / Revival Service Track Builder -->
+        <div class="tracks-card" id="tracksCard">
+          <div class="tracks-header">
+            <div>
+              <h3>🎛️ Multi-Track Service Splitter (Worship Songs & Sermon Parts)</h3>
+              <p class="section-subtitle">Split individual worship songs, multi-part preaching, altar calls, and testimonies into clean, numbered files.</p>
+            </div>
+            <div class="tracks-actions">
+              <button class="btn btn-secondary btn-small" onclick="prefillRevivalTracks()">🪄 Pre-Fill Service Tracks</button>
+              <button class="btn btn-secondary btn-small" onclick="autoDetectWorshipSongs()">🎵 Auto-Detect Song Breaks</button>
+              <button class="btn btn-secondary btn-small" onclick="addNewTrack()">+ Add Track</button>
+            </div>
+          </div>
+
+          <div class="tracks-table-wrapper">
+            <table class="tracks-table">
+              <thead>
+                <tr>
+                  <th style="width: 35px">#</th>
+                  <th>Track Title / Label</th>
+                  <th style="width: 125px">Start</th>
+                  <th style="width: 125px">End</th>
+                  <th style="width: 90px">Duration</th>
+                  <th style="width: 100px">Preview</th>
+                  <th style="width: 45px"></th>
+                </tr>
+              </thead>
+              <tbody id="tracksTableBody">
+                <!-- Populated by JS -->
+              </tbody>
+            </table>
+          </div>
+
+          <div class="action-bar" style="margin-top: 16px;">
+            <button class="btn btn-primary btn-large" id="exportTracksBtn" onclick="exportCustomTracks()">
+              <span id="exportTracksBtnText">✂️ Export All Tracks Losslessly (-c copy)</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="action-bar" style="margin-top: 24px;">
           <button class="btn btn-success btn-large" id="exportBtn" onclick="runLosslessExport()">
-            <span id="exportBtnText">✂️ Execute Lossless Split (-c copy)</span>
+            <span id="exportBtnText">✂️ Execute Standard 3-Way Split (Opening / Sermon / Closing)</span>
           </button>
         </div>
       </section>
