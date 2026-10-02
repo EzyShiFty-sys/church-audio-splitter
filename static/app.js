@@ -953,6 +953,11 @@ function populateAISummary(data) {
   if (postEl) {
     postEl.value = data.social_post || '';
   }
+
+  const spotifyNotesEl = document.getElementById('aiSpotifyNotesText');
+  if (spotifyNotesEl) {
+    spotifyNotesEl.value = data.spotify_notes || '';
+  }
 }
 
 function copySocialPost() {
@@ -964,6 +969,18 @@ function copySocialPost() {
   }).catch(() => {
     document.execCommand('copy');
     alert('✓ Social media post copied to clipboard!');
+  });
+}
+
+function copySpotifyNotes() {
+  const textarea = document.getElementById('aiSpotifyNotesText');
+  if (!textarea) return;
+  textarea.select();
+  navigator.clipboard.writeText(textarea.value).then(() => {
+    alert('✓ Spotify for Creators notes copied to clipboard!\nReady to paste into Spotify & website.');
+  }).catch(() => {
+    document.execCommand('copy');
+    alert('✓ Spotify for Creators notes copied to clipboard!');
   });
 }
 

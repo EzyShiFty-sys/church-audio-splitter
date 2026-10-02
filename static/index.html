@@ -317,11 +317,21 @@
             <blockquote id="aiQuoteText" class="ai-quote"></blockquote>
           </div>
           <div class="form-group full-width">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
               <label style="margin-bottom:0;">Ready-to-Post Description (YouTube & Facebook):</label>
-              <button class="btn btn-small btn-primary" onclick="copySocialPost()">📋 Copy Post to Clipboard</button>
+              <button class="btn btn-small btn-primary" onclick="copySocialPost()">📋 Copy Post</button>
             </div>
-            <textarea id="aiSocialPostText" rows="6" class="social-textarea"></textarea>
+            <textarea id="aiSocialPostText" rows="5" class="social-textarea"></textarea>
+          </div>
+
+          <div class="form-group full-width" style="border-top: 1px dashed var(--card-border); padding-top: 14px; margin-top: 6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+              <div>
+                <label style="margin-bottom:0;"><strong>🎙️ Spotify for Creators Episode Notes</strong> (Includes houseofrefugechurch.net):</label>
+              </div>
+              <button class="btn btn-small btn-success" onclick="copySpotifyNotes()">📋 Copy for Spotify</button>
+            </div>
+            <textarea id="aiSpotifyNotesText" rows="6" class="social-textarea" style="border-color: #10b981;"></textarea>
           </div>
         </div>
       </section>
@@ -351,7 +361,7 @@
         <div class="section-title-row" style="cursor: pointer;" onclick="toggleWatcherCollapse()">
           <div style="display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 1.4rem;">🤖</span>
-            <h2>Watch Folder & Batch Automation</h2>
+            <h2>UGREEN NAS & Audacity Watch Folder Automation</h2>
           </div>
           <div style="display:flex; align-items:center; gap: 10px;">
             <span id="watcherStatusBadge" class="badge" style="background: #475569; color: #fff;">Stopped</span>
@@ -359,18 +369,20 @@
           </div>
         </div>
         <p class="subtitle" style="margin-top: -8px; margin-bottom: 16px;">
-          Drop a church recording into a folder, and the splitter will automatically verify copy completion, analyze, tag with metadata/cover art, and export all splits in the background.
+          Export directly from Audacity into your UGREEN NAS folder. The watcher automatically detects when Audacity finishes saving, runs the split, tags the files with your church flyer, normalizes loudness for Spotify, and saves the cuts right back to your NAS.
         </p>
 
         <div id="watcherBody">
           <div class="form-grid">
             <div class="form-group full-width">
-              <label for="watcherWatchFolder">Watch Folder to Monitor:</label>
-              <input type="text" id="watcherWatchFolder" placeholder="C:\Users\nedmo_u3wbbic\Dev Projects\church-audio-splitter\watch_inbox" />
+              <label for="watcherWatchFolder">Watch Folder to Monitor (Local or UGREEN NAS share):</label>
+              <input type="text" id="watcherWatchFolder" placeholder="e.g. Z:\Audacity_Recordings or \\UGREEN-NAS\ChurchAudio\Inbox" />
+              <span class="hint">Path where Audacity saves your Sunday service audio file</span>
             </div>
             <div class="form-group full-width">
-              <label for="watcherOutputFolder">Destination Folder for Completed Splits:</label>
-              <input type="text" id="watcherOutputFolder" placeholder="C:\Users\nedmo_u3wbbic\Dev Projects\church-audio-splitter\splits" />
+              <label for="watcherOutputFolder">Destination Folder for Completed Splits (UGREEN NAS / Cloud):</label>
+              <input type="text" id="watcherOutputFolder" placeholder="e.g. Z:\Ready_For_Spotify or \\UGREEN-NAS\ChurchAudio\Splits" />
+              <span class="hint">Where finished, tagged, and normalized sermon & worship cuts will be placed</span>
             </div>
             <div class="form-group">
               <label for="watcherPreacher">Default Preacher / Speaker:</label>

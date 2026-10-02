@@ -108,10 +108,26 @@ def generate_social_summary(
         f"📖 \"{detected_title}\"\n"
         f"📍 Scripture: {scripture_list_str}\n"
         f"{preacher_tag}"
-        f"{series_tag}\n"
+        f"{series_tag}"
+        f"⛪ House of Refuge Church\n"
+        f"🌐 https://houseofrefugechurch.net/\n\n"
         f"\" {summary_sentence} \"\n\n"
-        f"Listen to the full sermon audio recording on our podcast & audio archives!\n"
-        f"#Sermon #ChurchAudio #Worship #Gospel"
+        f"Listen to the full sermon recording and worship songs on our podcast archives!\n"
+        f"#HouseOfRefuge #Sermon #Worship #ChurchAudio"
+    )
+
+    spotify_title = f"{detected_title} | {primary_scripture}" if (primary_scripture and primary_scripture != "Scripture Reference") else detected_title
+
+    spotify_notes = (
+        f"Welcome to House of Refuge Church! In this message, \"{detected_title}\", we dive into God's Word.\n\n"
+        f"📖 Scripture: {scripture_list_str}\n"
+        f"{preacher_tag}"
+        f"{series_tag}"
+        f"⛪ House of Refuge Church\n"
+        f"🌐 Website & Live Stream: https://houseofrefugechurch.net/\n\n"
+        f"Key Reflection:\n"
+        f"\"{summary_sentence}\"\n\n"
+        f"Thank you for listening! If this sermon was a blessing to you, please share it with family and friends, and connect with us online at https://houseofrefugechurch.net/."
     )
 
     return {
@@ -119,5 +135,7 @@ def generate_social_summary(
         "scriptures": scriptures,
         "primary_scripture": primary_scripture,
         "summary_quote": summary_sentence,
-        "social_post": post_template
+        "social_post": post_template,
+        "spotify_title": spotify_title,
+        "spotify_notes": spotify_notes
     }
