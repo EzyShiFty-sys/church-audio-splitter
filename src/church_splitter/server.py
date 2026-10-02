@@ -42,6 +42,15 @@ class DetectSongsRequest(BaseModel):
     audio_path: str
     worship_end: float = 3954.0
 
+class ResplitTrackRequest(BaseModel):
+    source_audio_path: str
+    output_path: str
+    start: float
+    end: float
+
+class LoadSummaryRequest(BaseModel):
+    folder_path: str
+
 class ExportRequest(BaseModel):
     audio_path: str
     output_dir: str
@@ -204,6 +213,52 @@ async def export_tracks_endpoint(req: MultiTrackExportRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/resplit-single-track")
+async def resplit_single_track(req: ResplitTrackRequest):
+    src = Path(req.source_audio_path)
+    dst = Path(req.output_path)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail="Source audio file not found")
+    try:
+        from church_splitter.ffmpeg_utils import lossless_cut
+        lossless_cut(src, dst, req.start, req.end)
+        info = get_audio_info(dst)
+        return {
+            "status": "success",
+            "path": str(dst.resolve()),
+            "duration": info["duration"],
+            "formatted_range": f"{format_timestamp(req.start)} - {format_timestamp(req.end)}"
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/load-split-summary")
+async def load_split_summary(req: LoadSummaryRequest):
+    p = Path(req.folder_path)
+    if not p.exists() or not p.is_dir():
+        raise HTTPException(status_code=404, detail="Directory not found")
+    
+    summary_files = list(p.glob("*_summary.json"))
+    if summary_files:
+        with open(summary_files[0], "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data
+    
+    audio_files = []
+    for f in sorted(p.iterdir()):
+        if f.suffix.lower() in [".mp3", ".wav", ".m4a"]:
+            info = get_audio_info(f)
+            audio_files.append({
+                "label": f.stem,
+                "filename": f.name,
+                "path": str(f.resolve()),
+                "duration": info["duration"],
+                "formatted_range": format_timestamp(info["duration"])
+            })
+    return {"files": audio_files, "source_file": str(p)}
 
 @app.get("/api/audio-stream")
 async def stream_audio(path: str):

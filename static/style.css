@@ -631,6 +631,167 @@ pre {
   background: #3730a3;
 }
 
+/* Split File Card with Audio Player & Inline Re-cut */
+.file-card {
+  background: #0f172a;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.2s;
+}
+
+.file-card:hover {
+  border-color: #475569;
+}
+
+.file-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.file-num {
+  background: #312e81;
+  color: #c7d2fe;
+  font-weight: 700;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 0.85rem;
+}
+
+.file-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.file-card-path {
+  font-size: 0.78rem;
+  color: #64748b;
+  font-family: var(--font-mono);
+}
+
+.file-card-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.file-player-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #1e293b;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  flex-wrap: wrap;
+}
+
+.split-audio-player {
+  flex: 1;
+  min-width: 260px;
+  height: 38px;
+  outline: none;
+}
+
+.inline-edit-panel {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.edit-panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 640px) {
+  .edit-panel-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.edit-bound-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.edit-bound-col label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.quick-adjust-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.quick-adjust-row input.time-input {
+  width: 95px;
+  background: #0f172a;
+  border: 1px solid #475569;
+  color: #fff;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+.btn-micro-listen {
+  background: transparent;
+  border: 1px solid #475569;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 4px;
+  align-self: flex-start;
+}
+
+.btn-micro-listen:hover {
+  background: #334155;
+  color: #fff;
+}
+
+.edit-panel-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #334155;
+}
+
+.recut-status {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
 /* Footer */
 .app-footer {
   text-align: center;

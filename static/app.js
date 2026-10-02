@@ -375,20 +375,203 @@ function renderExportResults(summary) {
   outputSection.classList.remove('hidden');
 
   filesList.innerHTML = '';
-  summary.files.forEach(f => {
+  const sourcePath = summary.source_file || currentAudioPath;
+
+  summary.files.forEach((f, idx) => {
+    const isAudio = f.filename.endsWith('.wav') || f.filename.endsWith('.mp3') || f.filename.endsWith('.m4a');
     const item = document.createElement('div');
-    item.className = 'file-item';
+    item.className = 'file-card';
+    item.id = `fileCard_${idx}`;
+
+    const streamUrl = `/api/audio-stream?path=${encodeURIComponent(f.path)}`;
+    const startVal = f.start !== undefined ? f.start : 0;
+    const endVal = f.end !== undefined ? f.end : (f.duration || 0);
+
     item.innerHTML = `
-      <div class="file-info">
-        <span class="file-label">${f.label}</span>
-        <span class="file-path">${f.path}</span>
+      <div class="file-card-header">
+        <div class="file-card-title-group">
+          <span class="file-num">${idx + 1}</span>
+          <div>
+            <h4 class="file-card-title">${f.label}</h4>
+            <span class="file-card-path">${f.filename}</span>
+          </div>
+        </div>
+        <div class="file-card-meta">
+          <span class="badge badge-tech" id="rangeBadge_${idx}">${f.formatted_range || formatTime(f.duration)}</span>
+          <span class="badge badge-whisper" id="durBadge_${idx}">${formatDuration(f.duration)}</span>
+        </div>
       </div>
-      <span class="badge badge-tech">${f.formatted_range || 'File'}</span>
+
+      ${isAudio ? `
+        <div class="file-player-row">
+          <audio controls preload="none" class="split-audio-player" id="player_${idx}" src="${streamUrl}"></audio>
+          <button class="btn btn-secondary btn-small" onclick="toggleEditPanel(${idx})">✏️ Edit & Re-Cut</button>
+        </div>
+
+        <div class="inline-edit-panel hidden" id="editPanel_${idx}">
+          <div class="edit-panel-grid">
+            <div class="edit-bound-col">
+              <label>Start Timestamp:</label>
+              <div class="quick-adjust-row">
+                <input type="text" class="time-input" id="editStart_${idx}" value="${formatTime(startVal)}" />
+                <button class="btn-micro" onclick="nudgeFileTime(${idx}, 'start', -5)">-5s</button>
+                <button class="btn-micro" onclick="nudgeFileTime(${idx}, 'start', -1)">-1s</button>
+                <button class="btn-micro" onclick="nudgeFileTime(${idx}, 'start', 1)">+1s</button>
+                <button class="btn-micro" onclick="nudgeFileTime(${idx}, 'start', 5)">+5s</button>
+              </div>
+              <button class="btn-micro-listen" onclick="previewSourceAt('${sourcePath}', ${idx}, 'start')">🎧 Listen Start Transition</button>
+            </div>
+
+            <div class="edit-bound-col">
+              <label>End Timestamp:</label>
+              <div class="quick-adjust-row">
+                <input type="text" class="time-input" id="editEnd_${idx}" value="${formatTime(endVal)}" />
+                <button class="btn-micro" onclick="nudgeFileTime(${idx}, 'end', -5)">-5s</button>
+                <button class="btn-micro" onclick="nudgeFileTime(${idx}, 'end', -1)">-1s</button>
+                <button class="btn-micro" onclick="nudgeFileTime(${idx}, 'end', 1)">+1s</button>
+                <button class="btn-micro" onclick="nudgeFileTime(${idx}, 'end', 5)">+5s</button>
+              </div>
+              <button class="btn-micro-listen" onclick="previewSourceAt('${sourcePath}', ${idx}, 'end')">🎧 Listen End Transition</button>
+            </div>
+          </div>
+
+          <div class="edit-panel-footer">
+            <button class="btn btn-primary btn-small" id="recutBtn_${idx}" onclick="recutSingleFile('${sourcePath}', '${f.path.replace(/\\/g, '\\\\')}', ${idx})">
+              ✂️ Re-cut This File Losslessly (-c copy)
+            </button>
+            <span class="recut-status" id="recutStatus_${idx}"></span>
+          </div>
+        </div>
+      ` : ''}
     `;
     filesList.appendChild(item);
   });
 
   outputSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+function toggleEditPanel(idx) {
+  const panel = document.getElementById(`editPanel_${idx}`);
+  if (panel) {
+    panel.classList.toggle('hidden');
+  }
+}
+
+function nudgeFileTime(idx, type, delta) {
+  const input = document.getElementById(type === 'start' ? `editStart_${idx}` : `editEnd_${idx}`);
+  if (!input) return;
+  let t = parseTime(input.value);
+  t = Math.max(0, t + delta);
+  input.value = formatTime(t);
+}
+
+function previewSourceAt(src, idx, type) {
+  const input = document.getElementById(type === 'start' ? `editStart_${idx}` : `editEnd_${idx}`);
+  if (!input) return;
+  const t = parseTime(input.value);
+  const audioEl = document.getElementById('audioPreview');
+  const streamUrl = `/api/audio-stream?path=${encodeURIComponent(src)}`;
+  if (!audioEl.src.includes(encodeURIComponent(src))) {
+    audioEl.src = streamUrl;
+  }
+  audioEl.currentTime = Math.max(0, t - 6);
+  audioEl.play();
+}
+
+async function recutSingleFile(src, dst, idx) {
+  const startInput = document.getElementById(`editStart_${idx}`);
+  const endInput = document.getElementById(`editEnd_${idx}`);
+  const statusEl = document.getElementById(`recutStatus_${idx}`);
+  const recutBtn = document.getElementById(`recutBtn_${idx}`);
+
+  const s = parseTime(startInput.value);
+  const e = parseTime(endInput.value);
+
+  if (e <= s) {
+    alert('End time must be after start time.');
+    return;
+  }
+
+  recutBtn.disabled = true;
+  statusEl.innerText = '⏳ Cutting...';
+  statusEl.style.color = '#38bdf8';
+
+  try {
+    const res = await fetch('/api/resplit-single-track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_audio_path: src,
+        output_path: dst,
+        start: s,
+        end: e
+      })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    // Update player and badges
+    const player = document.getElementById(`player_${idx}`);
+    if (player) {
+      player.src = `/api/audio-stream?path=${encodeURIComponent(dst)}&v=${Date.now()}`;
+      player.load();
+    }
+    const rangeBadge = document.getElementById(`rangeBadge_${idx}`);
+    if (rangeBadge) rangeBadge.innerText = data.formatted_range;
+    const durBadge = document.getElementById(`durBadge_${idx}`);
+    if (durBadge) durBadge.innerText = formatDuration(data.duration);
+
+    statusEl.innerText = '✓ Re-cut successfully!';
+    statusEl.style.color = '#34d399';
+  } catch (err) {
+    statusEl.innerText = '❌ Error: ' + err.message;
+    statusEl.style.color = '#f87171';
+  } finally {
+    recutBtn.disabled = false;
+  }
+}
+
+async function loadSavedSplitsFolder() {
+  const folderInput = document.getElementById('loadFolderInput');
+  const folderPath = folderInput ? folderInput.value.trim() : '';
+  if (!folderPath) {
+    alert('Please enter a folder path with split files.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/load-split-summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder_path: folderPath })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    if (data.source_file) {
+      currentAudioPath = data.source_file;
+      document.getElementById('audioPath').value = data.source_file;
+      setupAudioPlayer(data.source_file);
+    }
+    if (data.source_duration_seconds) {
+      currentDuration = data.source_duration_seconds;
+    }
+
+    // Populate customTracks table
+    if (data.files && data.files.length > 0) {
+      customTracks = data.files.filter(f => f.start !== undefined).map(f => ({
+        label: f.label,
+        start: f.start,
+        end: f.end
+      }));
+      document.getElementById('resultsSection').classList.remove('hidden');
+      renderTracks();
+    }
+
+    renderExportResults(data);
+  } catch (err) {
+    alert('Failed to load saved cuts: ' + err.message);
+  }
 }
 
 function toggleTranscript() {
@@ -426,14 +609,26 @@ function renderTracks() {
         <input type="text" value="${t.label}" onchange="updateTrack(${i}, 'label', this.value)" />
       </td>
       <td>
-        <input type="text" class="time-input" value="${formatTime(t.start)}" onchange="updateTrack(${i}, 'start', this.value)" />
+        <div style="display: flex; gap: 2px; align-items: center;">
+          <input type="text" class="time-input" value="${formatTime(t.start)}" onchange="updateTrack(${i}, 'start', this.value)" style="width: 75px;" />
+          <button class="btn-micro" onclick="nudgeTrack(${i}, 'start', -1)">-1</button>
+          <button class="btn-micro" onclick="nudgeTrack(${i}, 'start', 1)">+1</button>
+        </div>
       </td>
       <td>
-        <input type="text" class="time-input" value="${formatTime(t.end)}" onchange="updateTrack(${i}, 'end', this.value)" />
+        <div style="display: flex; gap: 2px; align-items: center;">
+          <input type="text" class="time-input" value="${formatTime(t.end)}" onchange="updateTrack(${i}, 'end', this.value)" style="width: 75px;" />
+          <button class="btn-micro" onclick="nudgeTrack(${i}, 'end', -1)">-1</button>
+          <button class="btn-micro" onclick="nudgeTrack(${i}, 'end', 1)">+1</button>
+        </div>
       </td>
       <td style="font-family: var(--font-mono); color: #38bdf8;">${formatDuration(durSec)}</td>
       <td>
-        <button class="btn-track-play" onclick="previewTrack(${i})" title="Play this track">▶ Play</button>
+        <div style="display: flex; gap: 4px;">
+          <button class="btn-track-play" onclick="previewTrack(${i})" title="Play this entire track">▶ Play</button>
+          <button class="btn-micro" onclick="previewTrackTransition(${i}, 'start')" title="Listen to cut start">🎧 Start</button>
+          <button class="btn-micro" onclick="previewTrackTransition(${i}, 'end')" title="Listen to cut end">🎧 End</button>
+        </div>
       </td>
       <td>
         <button class="btn-delete" onclick="deleteTrack(${i})" title="Remove track">✕</button>
@@ -441,6 +636,32 @@ function renderTracks() {
     `;
     tbody.appendChild(tr);
   });
+}
+
+function nudgeTrack(index, field, delta) {
+  if (field === 'start') {
+    customTracks[index].start = Math.max(0, customTracks[index].start + delta);
+  } else if (field === 'end') {
+    customTracks[index].end = Math.max(0, customTracks[index].end + delta);
+  }
+  renderTracks();
+}
+
+function previewTrackTransition(index, edge) {
+  const t = customTracks[index];
+  if (!t) return;
+  const targetTime = edge === 'start' ? t.start : t.end;
+  const audioEl = document.getElementById('audioPreview');
+  audioEl.currentTime = Math.max(0, targetTime - 5);
+  audioEl.play();
+  const stopTime = targetTime + 5;
+  const onTimeUpdate = () => {
+    if (audioEl.currentTime >= stopTime) {
+      audioEl.pause();
+      audioEl.removeEventListener('timeupdate', onTimeUpdate);
+    }
+  };
+  audioEl.addEventListener('timeupdate', onTimeUpdate);
 }
 
 function updateTrack(index, field, val) {
@@ -476,6 +697,13 @@ function previewTrack(index) {
   const audioEl = document.getElementById('audioPreview');
   audioEl.currentTime = t.start;
   audioEl.play();
+  const onTimeUpdate = () => {
+    if (audioEl.currentTime >= t.end) {
+      audioEl.pause();
+      audioEl.removeEventListener('timeupdate', onTimeUpdate);
+    }
+  };
+  audioEl.addEventListener('timeupdate', onTimeUpdate);
 }
 
 function prefillRevivalTracks() {

@@ -47,6 +47,15 @@
             <span class="hint">Where separated Worship Music & Sermon files will be saved</span>
           </div>
 
+          <div class="form-group full-width" style="margin-top: 4px; padding-top: 10px; border-top: 1px dashed var(--card-border);">
+            <label for="loadFolderInput">📂 Or Load Existing Split Folder (Play & Edit Saved Cuts):</label>
+            <div class="input-with-action">
+              <input type="text" id="loadFolderInput" value="splits/Monday Service - Revival_01_All_Tracks" placeholder="Folder with split audio files" />
+              <button class="btn btn-secondary" onclick="loadSavedSplitsFolder()">Load Saved Cuts</button>
+            </div>
+            <span class="hint">Loads all previously generated tracks with playable audio players and fine-tuning controls</span>
+          </div>
+
           <div class="form-group">
             <label for="modelSize">Whisper Model:</label>
             <select id="modelSize">
