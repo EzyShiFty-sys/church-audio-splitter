@@ -49,11 +49,16 @@ class ChurchAudioSplitter:
         combine_worship: bool = False,
         export_transcript: bool = True,
         sermon_transcript: str = "",
-        custom_base_name: Optional[str] = None
+        custom_base_name: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        cover_art_path: Optional[str | Path] = None,
+        normalize_loudness: bool = False,
+        export_mp3: bool = False
     ) -> Dict[str, Any]:
         """
-        Takes the detected/adjusted start and end timestamps and uses FFmpeg lossless cutting
-        (-c copy) to produce high-fidelity separate files for Worship Music and Sermon.
+        Takes the detected/adjusted start and end timestamps and produces high-fidelity
+        separate files for Worship Music and Sermon with optional ID3 metadata tags,
+        album artwork, and broadcast loudness normalization (-16 LUFS).
         """
         input_audio_path = Path(input_audio_path).resolve()
         output_dir = Path(output_dir).resolve()
@@ -61,8 +66,9 @@ class ChurchAudioSplitter:
 
         info = get_audio_info(input_audio_path)
         total_duration = info["duration"]
-        ext = input_audio_path.suffix.lower()
+        ext = ".mp3" if export_mp3 else input_audio_path.suffix.lower()
         base_name = custom_base_name or input_audio_path.stem
+        base_meta = dict(metadata or {})
 
         created_files: List[Dict[str, Any]] = []
 
@@ -71,11 +77,17 @@ class ChurchAudioSplitter:
         if sermon_start > 1.0:
             worship1_filename = f"{base_name}_01_Worship_Opening{ext}"
             worship1_path = output_dir / worship1_filename
+            w1_meta = dict(base_meta)
+            w1_meta["title"] = "Worship (Opening)"
+            w1_meta["track"] = "1/3"
             lossless_cut(
                 input_path=input_audio_path,
                 output_path=worship1_path,
                 start_sec=0.0,
-                end_sec=sermon_start
+                end_sec=sermon_start,
+                metadata=w1_meta,
+                cover_art_path=cover_art_path,
+                normalize_loudness=normalize_loudness
             )
             created_files.append({
                 "type": "worship_part1",
@@ -92,11 +104,17 @@ class ChurchAudioSplitter:
         # 2. Sermon
         sermon_filename = f"{base_name}_02_Sermon{ext}"
         sermon_path = output_dir / sermon_filename
+        sermon_meta = dict(base_meta)
+        sermon_meta["title"] = base_meta.get("title") or "Sermon"
+        sermon_meta["track"] = "2/3"
         lossless_cut(
             input_path=input_audio_path,
             output_path=sermon_path,
             start_sec=sermon_start,
-            end_sec=sermon_end
+            end_sec=sermon_end,
+            metadata=sermon_meta,
+            cover_art_path=cover_art_path,
+            normalize_loudness=normalize_loudness
         )
         created_files.append({
             "type": "sermon",
@@ -113,11 +131,17 @@ class ChurchAudioSplitter:
         if sermon_end < (total_duration - 1.0):
             worship2_filename = f"{base_name}_03_Worship_Closing{ext}"
             worship2_path = output_dir / worship2_filename
+            w2_meta = dict(base_meta)
+            w2_meta["title"] = "Worship (Closing & Response)"
+            w2_meta["track"] = "3/3"
             lossless_cut(
                 input_path=input_audio_path,
                 output_path=worship2_path,
                 start_sec=sermon_end,
-                end_sec=total_duration
+                end_sec=total_duration,
+                metadata=w2_meta,
+                cover_art_path=cover_art_path,
+                normalize_loudness=normalize_loudness
             )
             created_files.append({
                 "type": "worship_part2",
@@ -223,11 +247,16 @@ class ChurchAudioSplitter:
         input_audio_path: str | Path,
         output_dir: str | Path,
         tracks: List[Dict[str, Any]],
-        custom_base_name: Optional[str] = None
+        custom_base_name: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        cover_art_path: Optional[str | Path] = None,
+        normalize_loudness: bool = False,
+        export_mp3: bool = False
     ) -> Dict[str, Any]:
         """
         Losslessly cuts an arbitrary list of custom labeled tracks/segments
-        (e.g. Worship Song 1, Song 2, Preaching Part 1, Altar Call, Preaching Part 2, Testimonies).
+        (e.g. Worship Song 1, Song 2, Preaching Part 1, Altar Call, Preaching Part 2, Testimonies)
+        with ID3 metadata tags, album cover art, and loudness normalization.
         """
         input_audio_path = Path(input_audio_path).resolve()
         output_dir = Path(output_dir).resolve()
@@ -235,10 +264,13 @@ class ChurchAudioSplitter:
 
         info = get_audio_info(input_audio_path)
         total_duration = info["duration"]
-        ext = input_audio_path.suffix.lower()
+        ext = ".mp3" if export_mp3 else input_audio_path.suffix.lower()
         base_name = custom_base_name or input_audio_path.stem
+        base_meta = dict(metadata or {})
 
         created_files: List[Dict[str, Any]] = []
+        valid_tracks = [t for t in tracks if float(t.get("end", 0.0)) > float(t.get("start", 0.0))]
+        total_tracks_count = len(valid_tracks)
 
         for idx, track in enumerate(tracks, start=1):
             label = track.get("label", f"Track_{idx}").strip()
@@ -253,11 +285,19 @@ class ChurchAudioSplitter:
             out_filename = f"{base_name}_{idx:02d}_{safe_label}{ext}"
             out_path = output_dir / out_filename
 
+            # Build metadata tags for this track
+            track_meta = dict(base_meta)
+            track_meta["title"] = label
+            track_meta["track"] = f"{idx}/{total_tracks_count}"
+
             lossless_cut(
                 input_path=input_audio_path,
                 output_path=out_path,
                 start_sec=start_sec,
-                end_sec=end_sec
+                end_sec=end_sec,
+                metadata=track_meta,
+                cover_art_path=cover_art_path,
+                normalize_loudness=normalize_loudness
             )
 
             created_files.append({

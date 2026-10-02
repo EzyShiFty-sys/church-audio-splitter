@@ -9,12 +9,16 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from church_splitter.splitter import ChurchAudioSplitter, format_timestamp
-from church_splitter.ffmpeg_utils import get_audio_info, find_ffmpeg
+from church_splitter.ffmpeg_utils import get_audio_info, find_ffmpeg, lossless_cut
+from church_splitter.scripture_extractor import generate_social_summary, extract_scriptures, extract_sermon_title
+from church_splitter.watcher import ChurchAudioWatcher
 
 app = FastAPI(title="Church Audio Splitter API")
 
-# Global active jobs store
+# Global active jobs store and watcher
 analysis_jobs: Dict[str, Dict[str, Any]] = {}
+active_watcher: Optional[ChurchAudioWatcher] = None
+current_cover_art_path: Optional[str] = None
 
 STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -37,6 +41,10 @@ class MultiTrackExportRequest(BaseModel):
     output_dir: str
     tracks: List[TrackItem]
     custom_base_name: Optional[str] = None
+    metadata: Optional[Dict[str, str]] = None
+    cover_art_path: Optional[str] = None
+    normalize_loudness: bool = False
+    export_mp3: bool = False
 
 class DetectSongsRequest(BaseModel):
     audio_path: str
@@ -47,6 +55,9 @@ class ResplitTrackRequest(BaseModel):
     output_path: str
     start: float
     end: float
+    metadata: Optional[Dict[str, str]] = None
+    cover_art_path: Optional[str] = None
+    normalize_loudness: bool = False
 
 class LoadSummaryRequest(BaseModel):
     folder_path: str
@@ -60,6 +71,27 @@ class ExportRequest(BaseModel):
     export_transcript: bool = True
     sermon_transcript: Optional[str] = ""
     custom_base_name: Optional[str] = None
+    metadata: Optional[Dict[str, str]] = None
+    cover_art_path: Optional[str] = None
+    normalize_loudness: bool = False
+    export_mp3: bool = False
+
+class ExtractSermonInfoRequest(BaseModel):
+    transcript: str
+    title: Optional[str] = None
+    preacher: Optional[str] = None
+    series: Optional[str] = None
+
+class WatcherStartRequest(BaseModel):
+    watch_folder: str
+    output_folder: Optional[str] = None
+    default_preacher: Optional[str] = ""
+    default_series: Optional[str] = ""
+    default_genre: Optional[str] = "Sermon"
+    normalize_loudness: bool = False
+    export_mp3: bool = False
+    cover_art_path: Optional[str] = None
+    model_size: str = "base"
 
 @app.get("/api/system-info")
 async def get_system_info():
@@ -173,7 +205,11 @@ async def export_audio(req: ExportRequest):
             combine_worship=req.combine_worship,
             export_transcript=req.export_transcript,
             sermon_transcript=req.sermon_transcript or "",
-            custom_base_name=req.custom_base_name
+            custom_base_name=req.custom_base_name,
+            metadata=req.metadata,
+            cover_art_path=req.cover_art_path or current_cover_art_path,
+            normalize_loudness=req.normalize_loudness,
+            export_mp3=req.export_mp3
         )
         return summary
     except Exception as e:
@@ -206,7 +242,11 @@ async def export_tracks_endpoint(req: MultiTrackExportRequest):
             input_audio_path=input_path,
             output_dir=output_dir,
             tracks=tracks_data,
-            custom_base_name=req.custom_base_name
+            custom_base_name=req.custom_base_name,
+            metadata=req.metadata,
+            cover_art_path=req.cover_art_path or current_cover_art_path,
+            normalize_loudness=req.normalize_loudness,
+            export_mp3=req.export_mp3
         )
         return summary
     except Exception as e:
@@ -221,8 +261,15 @@ async def resplit_single_track(req: ResplitTrackRequest):
     if not src.exists():
         raise HTTPException(status_code=404, detail="Source audio file not found")
     try:
-        from church_splitter.ffmpeg_utils import lossless_cut
-        lossless_cut(src, dst, req.start, req.end)
+        lossless_cut(
+            input_path=src,
+            output_path=dst,
+            start_sec=req.start,
+            end_sec=req.end,
+            metadata=req.metadata,
+            cover_art_path=req.cover_art_path or current_cover_art_path,
+            normalize_loudness=req.normalize_loudness
+        )
         info = get_audio_info(dst)
         return {
             "status": "success",
@@ -234,6 +281,88 @@ async def resplit_single_track(req: ResplitTrackRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/upload-cover-art")
+async def upload_cover_art(file: UploadFile = File(...)):
+    global current_cover_art_path
+    upload_dir = Path(os.environ.get("TEMP", "/tmp")) / "church_audio_uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(file.filename).suffix.lower() or ".jpg"
+    target_path = upload_dir / f"cover_art{ext}"
+
+    with open(target_path, "wb") as f:
+        while chunk := await file.read(1024 * 1024):
+            f.write(chunk)
+
+    current_cover_art_path = str(target_path.resolve())
+    return {
+        "status": "success",
+        "path": current_cover_art_path,
+        "filename": file.filename,
+        "url": "/api/cover-art"
+    }
+
+@app.get("/api/cover-art")
+async def get_cover_art():
+    global current_cover_art_path
+    if current_cover_art_path and Path(current_cover_art_path).exists():
+        media_type = "image/png" if current_cover_art_path.endswith(".png") else "image/jpeg"
+        return FileResponse(current_cover_art_path, media_type=media_type)
+    raise HTTPException(status_code=404, detail="No cover art uploaded")
+
+@app.post("/api/extract-sermon-info")
+async def extract_sermon_info_endpoint(req: ExtractSermonInfoRequest):
+    try:
+        summary = generate_social_summary(
+            transcript=req.transcript,
+            title=req.title,
+            preacher=req.preacher,
+            series=req.series
+        )
+        return summary
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/watcher/status")
+async def get_watcher_status():
+    global active_watcher
+    if active_watcher is None:
+        return {
+            "is_running": False,
+            "status": "stopped",
+            "watch_folder": "",
+            "output_folder": "",
+            "logs": []
+        }
+    return active_watcher.get_status()
+
+@app.post("/api/watcher/start")
+async def start_watcher(req: WatcherStartRequest):
+    global active_watcher, current_cover_art_path
+    if active_watcher and active_watcher._running:
+        active_watcher.stop()
+
+    active_watcher = ChurchAudioWatcher(
+        watch_folder=req.watch_folder,
+        output_folder=req.output_folder,
+        default_preacher=req.default_preacher or "",
+        default_series=req.default_series or "",
+        default_genre=req.default_genre or "Sermon",
+        cover_art_path=req.cover_art_path or current_cover_art_path,
+        normalize_loudness=req.normalize_loudness,
+        export_mp3=req.export_mp3,
+        model_size=req.model_size
+    )
+    active_watcher.start()
+    return active_watcher.get_status()
+
+@app.post("/api/watcher/stop")
+async def stop_watcher():
+    global active_watcher
+    if active_watcher:
+        active_watcher.stop()
+        return active_watcher.get_status()
+    return {"is_running": False, "status": "stopped"}
 
 @app.post("/api/load-split-summary")
 async def load_split_summary(req: LoadSummaryRequest):

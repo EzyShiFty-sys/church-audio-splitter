@@ -104,6 +104,60 @@
         </div>
       </section>
 
+      <!-- Section 1B: Metadata, Album Art & Audio Processing -->
+      <section class="card metadata-card">
+        <div class="section-title-row">
+          <h2>🏷️ MP3 Metadata Tags, Album Cover Art & Normalization</h2>
+          <span class="badge badge-tech">ID3v2 & Broadcast Specs</span>
+        </div>
+
+        <div class="meta-container-grid">
+          <!-- Artwork Upload & Preview -->
+          <div class="cover-art-box" onclick="triggerCoverArtUpload()">
+            <input type="file" id="coverArtInput" accept="image/jpeg,image/png,image/webp" style="display:none;" />
+            <div id="coverArtPreview" class="cover-art-preview">
+              <span class="cover-art-icon">🖼️</span>
+              <span class="cover-art-label">Click to Upload Church Flyer / Logo</span>
+              <span class="hint" style="text-align: center;">Embedded directly into cut files</span>
+            </div>
+          </div>
+
+          <!-- Metadata Fields -->
+          <div class="meta-fields-grid">
+            <div class="form-group">
+              <label for="metaPreacher">Preacher / Speaker:</label>
+              <input type="text" id="metaPreacher" placeholder="e.g. Pastor Tim" />
+            </div>
+            <div class="form-group">
+              <label for="metaAlbum">Album / Sermon Series:</label>
+              <input type="text" id="metaAlbum" placeholder="e.g. Revival Services 2026" />
+            </div>
+            <div class="form-group">
+              <label for="metaYear">Year:</label>
+              <input type="text" id="metaYear" value="2026" />
+            </div>
+            <div class="form-group">
+              <label for="metaGenre">Genre:</label>
+              <input type="text" id="metaGenre" value="Sermon" />
+            </div>
+            <div class="form-group full-width">
+              <label for="exportFormatSelect">Audio Export Format:</label>
+              <select id="exportFormatSelect">
+                <option value="copy" selected>Lossless Stream Copy (Original Quality, 0% Re-encoding)</option>
+                <option value="mp3">Standard High-Quality MP3 (192 kbps - Best for Car Stereos & Phones)</option>
+              </select>
+            </div>
+            <div class="form-group full-width">
+              <label class="checkbox-container">
+                <input type="checkbox" id="normalizeLoudnessCheck" />
+                <span class="checkmark"></span>
+                <span><strong>🔊 Broadcast Loudness Normalization (-16 LUFS)</strong><br><small style="color: var(--text-secondary);">Levels quiet speech and balances volume against loud worship music (podcast & mobile standard)</small></span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Section 2: Interactive Timeline & Speech Density -->
       <section class="card results-card hidden" id="resultsSection">
         <div class="section-title-row">
@@ -240,10 +294,42 @@
         </div>
       </section>
 
+      <!-- AI Scripture & Social Summary Card -->
+      <section class="card ai-summary-card hidden" id="aiSummarySection">
+        <div class="section-title-row">
+          <h2>📖 AI Scripture & Social Media Summary</h2>
+          <button class="btn btn-secondary btn-small" onclick="generateAISummary()">✨ Refresh AI Summary</button>
+        </div>
+        
+        <div class="ai-summary-grid">
+          <div class="form-group">
+            <label>Detected Sermon Title:</label>
+            <input type="text" id="aiSermonTitle" placeholder="Detected Title" />
+          </div>
+          <div class="form-group">
+            <label>Detected Bible Verses:</label>
+            <div class="scripture-pills" id="scripturePills">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+          <div class="form-group full-width">
+            <label>Key Sermon Quote:</label>
+            <blockquote id="aiQuoteText" class="ai-quote"></blockquote>
+          </div>
+          <div class="form-group full-width">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+              <label style="margin-bottom:0;">Ready-to-Post Description (YouTube & Facebook):</label>
+              <button class="btn btn-small btn-primary" onclick="copySocialPost()">📋 Copy Post to Clipboard</button>
+            </div>
+            <textarea id="aiSocialPostText" rows="6" class="social-textarea"></textarea>
+          </div>
+        </div>
+      </section>
+
       <!-- Section 3: Export Results & Transcript -->
       <section class="card output-card hidden" id="outputSection">
         <h2>3. Generated Files</h2>
-        <p class="success-message">✓ Split completed losslessly without re-encoding! Original audio quality preserved.</p>
+        <p class="success-message">✓ Split completed! Audio files created with embedded metadata and artwork.</p>
         <div class="files-list" id="filesList">
           <!-- Populated by JS -->
         </div>
@@ -256,6 +342,56 @@
           </div>
           <div class="transcript-body hidden" id="transcriptBody">
             <pre id="transcriptText"></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- Watch Folder & Automation Section -->
+      <section class="card watcher-card">
+        <div class="section-title-row" style="cursor: pointer;" onclick="toggleWatcherCollapse()">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.4rem;">🤖</span>
+            <h2>Watch Folder & Batch Automation</h2>
+          </div>
+          <div style="display:flex; align-items:center; gap: 10px;">
+            <span id="watcherStatusBadge" class="badge" style="background: #475569; color: #fff;">Stopped</span>
+            <span id="watcherToggleIcon">▼</span>
+          </div>
+        </div>
+        <p class="subtitle" style="margin-top: -8px; margin-bottom: 16px;">
+          Drop a church recording into a folder, and the splitter will automatically verify copy completion, analyze, tag with metadata/cover art, and export all splits in the background.
+        </p>
+
+        <div id="watcherBody">
+          <div class="form-grid">
+            <div class="form-group full-width">
+              <label for="watcherWatchFolder">Watch Folder to Monitor:</label>
+              <input type="text" id="watcherWatchFolder" placeholder="C:\Users\nedmo_u3wbbic\Dev Projects\church-audio-splitter\watch_inbox" />
+            </div>
+            <div class="form-group full-width">
+              <label for="watcherOutputFolder">Destination Folder for Completed Splits:</label>
+              <input type="text" id="watcherOutputFolder" placeholder="C:\Users\nedmo_u3wbbic\Dev Projects\church-audio-splitter\splits" />
+            </div>
+            <div class="form-group">
+              <label for="watcherPreacher">Default Preacher / Speaker:</label>
+              <input type="text" id="watcherPreacher" placeholder="Pastor Tim" />
+            </div>
+            <div class="form-group">
+              <label for="watcherSeries">Default Series:</label>
+              <input type="text" id="watcherSeries" placeholder="Sunday Services" />
+            </div>
+          </div>
+
+          <div class="watcher-controls" style="margin-top: 14px; display: flex; gap: 12px; align-items: center;">
+            <button class="btn btn-success" id="watcherStartBtn" onclick="startFolderWatcher()">▶️ Start Folder Watcher</button>
+            <button class="btn btn-secondary hidden" id="watcherStopBtn" onclick="stopFolderWatcher()">⏹️ Stop Watcher</button>
+            <span id="watcherCurrentMsg" style="color: var(--text-secondary); font-size: 0.88rem;"></span>
+          </div>
+
+          <!-- Watcher Logs -->
+          <div class="watcher-logs-box" style="margin-top: 14px;">
+            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Watcher Activity Log:</div>
+            <pre id="watcherLogs" class="watcher-log-content">Watcher is currently stopped.</pre>
           </div>
         </div>
       </section>

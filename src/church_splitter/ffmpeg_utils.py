@@ -66,11 +66,15 @@ def lossless_cut(
     input_path: str | Path,
     output_path: str | Path,
     start_sec: float,
-    end_sec: Optional[float] = None
+    end_sec: Optional[float] = None,
+    metadata: Optional[Dict[str, str]] = None,
+    cover_art_path: Optional[str | Path] = None,
+    normalize_loudness: bool = False
 ) -> None:
     """
-    Performs lossless audio cutting using FFmpeg stream copy (-c copy).
-    Preserves exact audio stream data, bitrate, and quality without re-encoding.
+    Performs audio cutting with optional ID3/RIFF metadata tagging,
+    album cover art embedding, and EBU R128 (-16 LUFS) broadcast loudness normalization.
+    Uses FFmpeg stream copy (-c copy) whenever possible for lossless zero-degradation output.
     """
     input_path = Path(input_path).resolve()
     output_path = Path(output_path).resolve()
@@ -78,10 +82,14 @@ def lossless_cut(
 
     ffmpeg_bin = find_ffmpeg()
     
-    # Using input seeking with -ss before -i and -to for fast lossless cutting
+    is_mp3_output = output_path.suffix.lower() == ".mp3"
+    input_is_wav = input_path.suffix.lower() == ".wav"
+    has_cover_art = bool(cover_art_path and Path(cover_art_path).exists() and is_mp3_output)
+    reencode_needed = normalize_loudness or (is_mp3_output and input_is_wav)
+
     cmd = [ffmpeg_bin, "-y"]
     
-    # Precise seek
+    # Input seek
     if start_sec > 0:
         cmd.extend(["-ss", f"{start_sec:.3f}"])
         
@@ -92,11 +100,42 @@ def lossless_cut(
         if duration_to_cut > 0:
             cmd.extend(["-t", f"{duration_to_cut:.3f}"])
 
-    cmd.extend(["-c", "copy", str(output_path)])
+    if has_cover_art:
+        cmd.extend(["-i", str(Path(cover_art_path).resolve())])
+        cmd.extend(["-map", "0:a", "-map", "1:0"])
+
+    # Loudness normalization or audio encoding
+    if normalize_loudness:
+        cmd.extend(["-af", "loudnorm=I=-16:TP=-1.5:LRA=11"])
+        if is_mp3_output:
+            cmd.extend(["-c:a", "libmp3lame", "-b:a", "192k"])
+        else:
+            cmd.extend(["-c:a", "pcm_s16le"])
+    elif reencode_needed:
+        cmd.extend(["-c:a", "libmp3lame", "-b:a", "192k"])
+    else:
+        cmd.extend(["-c:a", "copy"] if has_cover_art else ["-c", "copy"])
+
+    # Embed cover art video stream for MP3 ID3v2
+    if has_cover_art:
+        cmd.extend([
+            "-c:v", "mjpeg",
+            "-id3v2_version", "3",
+            "-metadata:s:v", "title=Album cover",
+            "-metadata:s:v", "comment=Cover (front)"
+        ])
+
+    # Metadata tagging (Title, Artist, Album, Year, Genre, Track)
+    if metadata:
+        for k, v in metadata.items():
+            if v is not None and str(v).strip():
+                cmd.extend(["-metadata", f"{k}={str(v).strip()}"])
+
+    cmd.append(str(output_path))
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg lossless cut failed: {result.stderr}")
+        raise RuntimeError(f"FFmpeg cut failed: {result.stderr}")
 
 def lossless_concat(input_paths: List[str | Path], output_path: str | Path) -> None:
     """Concatenates multiple audio files of identical codec/format losslessly using concat demuxer."""

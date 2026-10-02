@@ -4,6 +4,8 @@ let detectedResult = null;
 let currentStart = 0;
 let currentEnd = 0;
 let timelineData = [];
+let uploadedCoverArtPath = null;
+let watcherPollTimer = null;
 
 function formatTime(seconds) {
   seconds = Math.max(0, Math.floor(seconds));
@@ -79,6 +81,59 @@ document.getElementById('hiddenFileInput').addEventListener('change', async (e) 
     document.getElementById('analyzeBtnText').innerText = '⚡ Analyze & Detect Sermon';
   }
 });
+
+function triggerCoverArtUpload() {
+  document.getElementById('coverArtInput').click();
+}
+
+document.getElementById('coverArtInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const preview = document.getElementById('coverArtPreview');
+  preview.innerHTML = '<span class="cover-art-icon">⏳</span><span class="cover-art-label">Uploading art...</span>';
+
+  try {
+    const res = await fetch('/api/upload-cover-art', {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    uploadedCoverArtPath = data.path;
+    preview.innerHTML = `<img class="cover-art-img" src="${data.url}?t=${Date.now()}" alt="Cover Art" />`;
+  } catch (err) {
+    alert('Failed to upload cover art: ' + err.message);
+    preview.innerHTML = '<span class="cover-art-icon">🖼️</span><span class="cover-art-label">Click to Upload Church Flyer / Logo</span>';
+  }
+});
+
+function getMetadataPayload() {
+  const preacher = document.getElementById('metaPreacher') ? document.getElementById('metaPreacher').value.trim() : "";
+  const album = document.getElementById('metaAlbum') ? document.getElementById('metaAlbum').value.trim() : "";
+  const year = document.getElementById('metaYear') ? document.getElementById('metaYear').value.trim() : "";
+  const genre = document.getElementById('metaGenre') ? document.getElementById('metaGenre').value.trim() : "";
+  const title = document.getElementById('aiSermonTitle') ? document.getElementById('aiSermonTitle').value.trim() : "";
+  const normalize = document.getElementById('normalizeLoudnessCheck') ? document.getElementById('normalizeLoudnessCheck').checked : false;
+  const exportMp3 = document.getElementById('exportFormatSelect') ? document.getElementById('exportFormatSelect').value === 'mp3' : false;
+
+  const metadata = {};
+  if (preacher) metadata.artist = preacher;
+  if (album) metadata.album = album;
+  if (year) metadata.date = year;
+  if (genre) metadata.genre = genre;
+  if (title) metadata.title = title;
+
+  return {
+    metadata: Object.keys(metadata).length > 0 ? metadata : null,
+    cover_art_path: uploadedCoverArtPath,
+    normalize_loudness: normalize,
+    export_mp3: exportMp3
+  };
+}
 
 function setupAudioPlayer(filePath) {
   const audioEl = document.getElementById('audioPreview');
@@ -184,9 +239,10 @@ function renderResults(result) {
   drawDensityTimeline();
   renderTracks();
 
-  // If transcript available, display it
+  // If transcript available, display it and extract AI scripture summary
   if (result.sermon_transcript) {
     document.getElementById('transcriptText').innerText = result.sermon_transcript;
+    autoExtractSermonSummary(result.sermon_transcript);
   }
 }
 
@@ -320,7 +376,6 @@ function drawDensityTimeline() {
 document.getElementById('densityCanvas').addEventListener('click', (e) => {
   const canvas = document.getElementById('densityCanvas');
   const rect = canvas.getBoundingClientRect();
-  const clickX = e.clientX - rect.width;
   const clickFraction = (e.clientX - rect.left) / rect.width;
   const clickedTime = clickFraction * currentDuration;
 
@@ -337,10 +392,11 @@ async function runLosslessExport() {
 
   const exportBtn = document.getElementById('exportBtn');
   exportBtn.disabled = true;
-  document.getElementById('exportBtnText').innerText = '✂️ Splitting losslessly (-c copy)...';
+  document.getElementById('exportBtnText').innerText = '✂️ Splitting & Tagging audio...';
 
   const combineWorship = document.getElementById('combineWorshipCheck').checked;
   const exportTranscript = document.getElementById('exportTranscriptCheck').checked;
+  const metaPayload = getMetadataPayload();
 
   try {
     const res = await fetch('/api/export', {
@@ -353,7 +409,11 @@ async function runLosslessExport() {
         sermon_end: currentEnd,
         combine_worship: combineWorship,
         export_transcript: exportTranscript,
-        sermon_transcript: detectedResult ? detectedResult.sermon_transcript : ""
+        sermon_transcript: detectedResult ? detectedResult.sermon_transcript : "",
+        metadata: metaPayload.metadata,
+        cover_art_path: metaPayload.cover_art_path,
+        normalize_loudness: metaPayload.normalize_loudness,
+        export_mp3: metaPayload.export_mp3
       })
     });
 
@@ -365,7 +425,7 @@ async function runLosslessExport() {
     alert('Export error: ' + err.message);
   } finally {
     exportBtn.disabled = false;
-    document.getElementById('exportBtnText').innerText = '✂️ Execute Lossless Split (-c copy)';
+    document.getElementById('exportBtnText').innerText = '✂️ Execute Standard 3-Way Split (Opening / Sermon / Closing)';
   }
 }
 
@@ -497,6 +557,7 @@ async function recutSingleFile(src, dst, idx) {
   statusEl.style.color = '#38bdf8';
 
   try {
+    const metaPayload = getMetadataPayload();
     const res = await fetch('/api/resplit-single-track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -504,7 +565,10 @@ async function recutSingleFile(src, dst, idx) {
         source_audio_path: src,
         output_path: dst,
         start: s,
-        end: e
+        end: e,
+        metadata: metaPayload.metadata,
+        cover_art_path: metaPayload.cover_art_path,
+        normalize_loudness: metaPayload.normalize_loudness
       })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -770,7 +834,9 @@ async function exportCustomTracks() {
 
   const exportBtn = document.getElementById('exportTracksBtn');
   exportBtn.disabled = true;
-  document.getElementById('exportTracksBtnText').innerText = 'Cutting Tracks Losslessly (-c copy)...';
+  document.getElementById('exportTracksBtnText').innerText = 'Cutting & Tagging Tracks...';
+
+  const metaPayload = getMetadataPayload();
 
   try {
     const res = await fetch('/api/export-tracks', {
@@ -779,7 +845,11 @@ async function exportCustomTracks() {
       body: JSON.stringify({
         audio_path: audioPath,
         output_dir: outputDir,
-        tracks: customTracks
+        tracks: customTracks,
+        metadata: metaPayload.metadata,
+        cover_art_path: metaPayload.cover_art_path,
+        normalize_loudness: metaPayload.normalize_loudness,
+        export_mp3: metaPayload.export_mp3
       })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -792,3 +862,222 @@ async function exportCustomTracks() {
     document.getElementById('exportTracksBtnText').innerText = '✂️ Export All Tracks Losslessly (-c copy)';
   }
 }
+
+// ================= AI Scripture & Social Summary =================
+
+async function autoExtractSermonSummary(transcript) {
+  if (!transcript) return;
+  const preacher = document.getElementById('metaPreacher') ? document.getElementById('metaPreacher').value.trim() : "";
+  const series = document.getElementById('metaAlbum') ? document.getElementById('metaAlbum').value.trim() : "";
+
+  try {
+    const res = await fetch('/api/extract-sermon-info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transcript: transcript,
+        preacher: preacher,
+        series: series
+      })
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    populateAISummary(data);
+  } catch (err) {
+    console.error('Error auto-extracting sermon info:', err);
+  }
+}
+
+async function generateAISummary() {
+  const transcript = detectedResult && detectedResult.sermon_transcript 
+    ? detectedResult.sermon_transcript 
+    : document.getElementById('transcriptText').innerText;
+
+  if (!transcript || transcript.trim().length === 0) {
+    alert('No sermon transcript available. Please run analysis first or load a service.');
+    return;
+  }
+  const preacher = document.getElementById('metaPreacher') ? document.getElementById('metaPreacher').value.trim() : "";
+  const series = document.getElementById('metaAlbum') ? document.getElementById('metaAlbum').value.trim() : "";
+  const title = document.getElementById('aiSermonTitle') ? document.getElementById('aiSermonTitle').value.trim() : "";
+
+  try {
+    const res = await fetch('/api/extract-sermon-info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transcript: transcript,
+        preacher: preacher,
+        series: series,
+        title: title || undefined
+      })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    populateAISummary(data);
+  } catch (err) {
+    alert('AI Summary generation error: ' + err.message);
+  }
+}
+
+function populateAISummary(data) {
+  const section = document.getElementById('aiSummarySection');
+  if (section) section.classList.remove('hidden');
+
+  const titleInput = document.getElementById('aiSermonTitle');
+  if (data.title && (!titleInput.value || titleInput.value.trim().length === 0)) {
+    titleInput.value = data.title;
+  }
+  
+  const pillsContainer = document.getElementById('scripturePills');
+  if (pillsContainer) {
+    pillsContainer.innerHTML = '';
+    if (data.scriptures && data.scriptures.length > 0) {
+      data.scriptures.forEach(sc => {
+        const pill = document.createElement('span');
+        pill.className = 'scripture-pill';
+        pill.innerText = `📖 ${sc}`;
+        pillsContainer.appendChild(pill);
+      });
+    } else {
+      pillsContainer.innerHTML = '<span style="color: var(--text-secondary); font-size: 0.85rem;">None detected</span>';
+    }
+  }
+
+  const quoteEl = document.getElementById('aiQuoteText');
+  if (quoteEl) {
+    quoteEl.innerText = data.summary_quote ? `"${data.summary_quote}"` : 'No highlighted quote extracted.';
+  }
+
+  const postEl = document.getElementById('aiSocialPostText');
+  if (postEl) {
+    postEl.value = data.social_post || '';
+  }
+}
+
+function copySocialPost() {
+  const textarea = document.getElementById('aiSocialPostText');
+  if (!textarea) return;
+  textarea.select();
+  navigator.clipboard.writeText(textarea.value).then(() => {
+    alert('✓ Social media post copied to clipboard!');
+  }).catch(() => {
+    document.execCommand('copy');
+    alert('✓ Social media post copied to clipboard!');
+  });
+}
+
+// ================= Watch Folder & Automation =================
+
+function toggleWatcherCollapse() {
+  const body = document.getElementById('watcherBody');
+  const icon = document.getElementById('watcherToggleIcon');
+  if (body.classList.contains('hidden')) {
+    body.classList.remove('hidden');
+    icon.innerText = '▼';
+  } else {
+    body.classList.add('hidden');
+    icon.innerText = '▲';
+  }
+}
+
+async function checkWatcherStatus() {
+  try {
+    const res = await fetch('/api/watcher/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    updateWatcherUI(data);
+  } catch (e) {
+    console.error('Watcher poll error:', e);
+  }
+}
+
+function updateWatcherUI(data) {
+  const badge = document.getElementById('watcherStatusBadge');
+  const startBtn = document.getElementById('watcherStartBtn');
+  const stopBtn = document.getElementById('watcherStopBtn');
+  const logEl = document.getElementById('watcherLogs');
+  const msgEl = document.getElementById('watcherCurrentMsg');
+
+  if (!badge) return;
+
+  if (data.is_running) {
+    badge.innerText = (data.status || 'RUNNING').toUpperCase();
+    badge.style.background = data.status === 'processing' ? '#f59e0b' : '#10b981';
+    badge.style.color = '#fff';
+    startBtn.classList.add('hidden');
+    stopBtn.classList.remove('hidden');
+    msgEl.innerText = data.current_file ? `Processing: ${data.current_file}` : 'Watching folder for new audio recordings...';
+  } else {
+    badge.innerText = 'STOPPED';
+    badge.style.background = '#475569';
+    badge.style.color = '#fff';
+    startBtn.classList.remove('hidden');
+    stopBtn.classList.add('hidden');
+    msgEl.innerText = '';
+  }
+
+  if (data.logs && data.logs.length > 0 && logEl) {
+    logEl.innerText = data.logs.join('\n');
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+
+async function startFolderWatcher() {
+  const watchFolder = document.getElementById('watcherWatchFolder').value.trim();
+  const outputFolder = document.getElementById('watcherOutputFolder').value.trim();
+  const preacher = document.getElementById('watcherPreacher').value.trim();
+  const series = document.getElementById('watcherSeries').value.trim();
+  const metaPayload = getMetadataPayload();
+
+  if (!watchFolder) {
+    alert('Please enter a watch folder path to monitor.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/watcher/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        watch_folder: watchFolder,
+        output_folder: outputFolder || null,
+        default_preacher: preacher,
+        default_series: series,
+        default_genre: "Sermon",
+        normalize_loudness: metaPayload.normalize_loudness,
+        export_mp3: metaPayload.export_mp3,
+        cover_art_path: metaPayload.cover_art_path,
+        model_size: document.getElementById('modelSize').value
+      })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    updateWatcherUI(data);
+    if (!watcherPollTimer) {
+      watcherPollTimer = setInterval(checkWatcherStatus, 3000);
+    }
+    alert(`✓ Watcher is now active! Monitoring:\n${watchFolder}`);
+  } catch (err) {
+    alert('Failed to start watcher: ' + err.message);
+  }
+}
+
+async function stopFolderWatcher() {
+  try {
+    const res = await fetch('/api/watcher/stop', { method: 'POST' });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    updateWatcherUI(data);
+    if (watcherPollTimer) {
+      clearInterval(watcherPollTimer);
+      watcherPollTimer = null;
+    }
+  } catch (err) {
+    alert('Failed to stop watcher: ' + err.message);
+  }
+}
+
+// Initial watcher poll on load
+checkWatcherStatus();
+setInterval(checkWatcherStatus, 6000);
