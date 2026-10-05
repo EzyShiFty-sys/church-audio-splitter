@@ -83,51 +83,59 @@ def generate_social_summary(
     transcript: str,
     title: Optional[str] = None,
     preacher: Optional[str] = None,
-    series: Optional[str] = None
+    series: Optional[str] = None,
+    service_type: Optional[str] = None
 ) -> Dict[str, Any]:
     """Generates sermon title, scripture list, and ready-to-share social media post."""
-    detected_title = title or extract_sermon_title(transcript) or "Sunday Service Message"
+    service_label = service_type or "Church Service"
+    detected_title = title or extract_sermon_title(transcript) or f"{service_label} Message"
     scriptures = extract_scriptures(transcript)
     primary_scripture = scriptures[0] if scriptures else "Scripture Reference"
 
-    # Extract 2 key sentences from transcript for description
+    # Extract key sentence from transcript for description
     sentences = [s.strip() for s in re.split(r"[.!?]\s+", transcript) if len(s.strip().split()) >= 8]
     summary_sentence = ""
     for s in sentences:
-        if any(word in s.lower() for word in ["god", "jesus", "lord", "faith", "spirit", "bible"]):
+        if any(word in s.lower() for word in ["god", "jesus", "lord", "faith", "spirit", "bible", "scripture", "grace", "word", "heart"]):
             summary_sentence = s + "."
             break
     if not summary_sentence and sentences:
         summary_sentence = sentences[0] + "."
 
     preacher_tag = f"Speaker: {preacher}\n" if preacher else ""
-    series_tag = f"Series: {series}\n" if series else ""
+    service_tag = f"Service: {service_label}\n"
+    series_tag = f"Series: {series}\n" if (series and series != service_label) else ""
     scripture_list_str = ", ".join(scriptures[:3]) if scriptures else "Holy Bible"
+
+    clean_srv = "".join(c for c in service_label if c.isalnum())
+    hashtag_service = f"#{clean_srv}" if clean_srv else "#ChurchService"
 
     post_template = (
         f"📖 \"{detected_title}\"\n"
         f"📍 Scripture: {scripture_list_str}\n"
         f"{preacher_tag}"
+        f"{service_tag}"
         f"{series_tag}"
         f"⛪ House of Refuge Church\n"
         f"🌐 https://houseofrefugechurch.net/\n\n"
         f"\" {summary_sentence} \"\n\n"
-        f"Listen to the full sermon recording and worship songs on our podcast archives!\n"
-        f"#HouseOfRefuge #Sermon #Worship #ChurchAudio"
+        f"Listen to the full recording on our podcast archives!\n"
+        f"#HouseOfRefuge {hashtag_service} #Sermon #Preaching #Worship"
     )
 
     spotify_title = f"{detected_title} | {primary_scripture}" if (primary_scripture and primary_scripture != "Scripture Reference") else detected_title
 
     spotify_notes = (
-        f"Welcome to House of Refuge Church! In this message, \"{detected_title}\", we dive into God's Word.\n\n"
+        f"Welcome to House of Refuge Church! In this {service_label} message, \"{detected_title}\", we dive into God's Word.\n\n"
         f"📖 Scripture: {scripture_list_str}\n"
         f"{preacher_tag}"
+        f"{service_tag}"
         f"{series_tag}"
         f"⛪ House of Refuge Church\n"
         f"🌐 Website & Live Stream: https://houseofrefugechurch.net/\n\n"
         f"Key Reflection:\n"
         f"\"{summary_sentence}\"\n\n"
-        f"Thank you for listening! If this sermon was a blessing to you, please share it with family and friends, and connect with us online at https://houseofrefugechurch.net/."
+        f"Thank you for listening! If this message was a blessing to you, please share it with family and friends, and connect with us online at https://houseofrefugechurch.net/."
     )
 
     return {

@@ -936,6 +936,28 @@ pre {
   white-space: pre-wrap;
 }
 
+.btn-micro-export {
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid var(--worship-blue);
+  color: #38bdf8;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.btn-micro-export:hover {
+  background: var(--worship-blue);
+  color: #0f172a;
+}
+
+.track-selected-row {
+  background: rgba(56, 189, 248, 0.05);
+}
+
 /* Footer */
 .app-footer {
   text-align: center;

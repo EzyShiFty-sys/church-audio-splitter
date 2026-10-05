@@ -111,12 +111,45 @@ document.getElementById('coverArtInput').addEventListener('change', async (e) =>
   }
 });
 
+function onServiceTypeChange(val) {
+  const albumInput = document.getElementById('metaAlbum');
+  if (albumInput) {
+    if (val === 'Sunday Morning Service') albumInput.value = 'Sunday Morning Service';
+    else if (val === 'Sunday School (Adult Teaching)') albumInput.value = 'Adult Sunday School Teaching';
+    else if (val === 'Wednesday Evening Service') albumInput.value = 'Wednesday Evening Service';
+    else if (val === 'Friday Evening Service') albumInput.value = 'Friday Evening Service';
+    else if (val === 'Revival / Special Service') albumInput.value = 'Revival Services';
+    else albumInput.value = 'Church Service Audio';
+  }
+}
+
+function syncMessageTitle(val) {
+  const aiTitle = document.getElementById('aiSermonTitle');
+  if (aiTitle && aiTitle.value !== val) {
+    aiTitle.value = val;
+  }
+}
+
+function syncMetaTitle(val) {
+  const metaTitle = document.getElementById('metaMessageTitle');
+  if (metaTitle && metaTitle.value !== val) {
+    metaTitle.value = val;
+  }
+}
+
+function onMessageTitleInput(val) {
+  syncMessageTitle(val);
+}
+
 function getMetadataPayload() {
   const preacher = document.getElementById('metaPreacher') ? document.getElementById('metaPreacher').value.trim() : "";
   const album = document.getElementById('metaAlbum') ? document.getElementById('metaAlbum').value.trim() : "";
   const year = document.getElementById('metaYear') ? document.getElementById('metaYear').value.trim() : "";
   const genre = document.getElementById('metaGenre') ? document.getElementById('metaGenre').value.trim() : "";
-  const title = document.getElementById('aiSermonTitle') ? document.getElementById('aiSermonTitle').value.trim() : "";
+  const msgTitleInput = document.getElementById('metaMessageTitle');
+  const aiTitleInput = document.getElementById('aiSermonTitle');
+  const title = (msgTitleInput && msgTitleInput.value.trim()) || (aiTitleInput && aiTitleInput.value.trim()) || "";
+  const serviceType = document.getElementById('metaServiceType') ? document.getElementById('metaServiceType').value : "";
   const normalize = document.getElementById('normalizeLoudnessCheck') ? document.getElementById('normalizeLoudnessCheck').checked : false;
   const exportMp3 = document.getElementById('exportFormatSelect') ? document.getElementById('exportFormatSelect').value === 'mp3' : false;
 
@@ -126,12 +159,15 @@ function getMetadataPayload() {
   if (year) metadata.date = year;
   if (genre) metadata.genre = genre;
   if (title) metadata.title = title;
+  if (serviceType) metadata.comment = serviceType;
 
   return {
     metadata: Object.keys(metadata).length > 0 ? metadata : null,
     cover_art_path: uploadedCoverArtPath,
     normalize_loudness: normalize,
-    export_mp3: exportMp3
+    export_mp3: exportMp3,
+    service_type: serviceType,
+    title: title
   };
 }
 
@@ -660,17 +696,25 @@ function renderTracks() {
   tbody.innerHTML = '';
 
   if (customTracks.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: #94a3b8; padding: 20px;">No custom tracks added yet. Click <strong>🪄 Pre-Fill Service Tracks</strong> or <strong>+ Add Track</strong> above.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: #94a3b8; padding: 20px;">No custom tracks added yet. Click <strong>☀️ Sunday School</strong>, <strong>📖 Sunday Morning</strong>, <strong>🕯️ Wednesday</strong>, <strong>🔥 Friday</strong>, or <strong>+ Add Track</strong> above.</td></tr>`;
+    updateSelectionCountUI();
     return;
   }
 
   customTracks.forEach((t, i) => {
+    if (t.selected === undefined) t.selected = true;
+    const isSelected = t.selected !== false;
     const durSec = Math.max(0, t.end - t.start);
     const tr = document.createElement('tr');
+    if (isSelected) tr.className = 'track-selected-row';
+
     tr.innerHTML = `
+      <td style="text-align: center;">
+        <input type="checkbox" class="track-check" ${isSelected ? 'checked' : ''} onchange="toggleTrackSelected(${i}, this.checked)" title="Include in export" />
+      </td>
       <td style="color: #64748b; font-weight: 600;">${i + 1}</td>
       <td>
-        <input type="text" value="${t.label}" onchange="updateTrack(${i}, 'label', this.value)" />
+        <input type="text" value="${t.label}" onchange="updateTrack(${i}, 'label', this.value)" style="width: 100%;" />
       </td>
       <td>
         <div style="display: flex; gap: 2px; align-items: center;">
@@ -694,12 +738,80 @@ function renderTracks() {
           <button class="btn-micro" onclick="previewTrackTransition(${i}, 'end')" title="Listen to cut end">🎧 End</button>
         </div>
       </td>
+      <td style="text-align: center;">
+        <button class="btn-micro-export" onclick="exportSingleTrackByIndex(${i})" title="Export only this individual track">✂️ Export This</button>
+      </td>
       <td>
         <button class="btn-delete" onclick="deleteTrack(${i})" title="Remove track">✕</button>
       </td>
     `;
     tbody.appendChild(tr);
   });
+
+  updateSelectionCountUI();
+}
+
+function toggleTrackSelected(index, isChecked) {
+  if (customTracks[index]) {
+    customTracks[index].selected = isChecked;
+  }
+  const tbody = document.getElementById('tracksTableBody');
+  if (tbody && tbody.children[index]) {
+    if (isChecked) {
+      tbody.children[index].classList.add('track-selected-row');
+    } else {
+      tbody.children[index].classList.remove('track-selected-row');
+    }
+  }
+  updateSelectionCountUI();
+}
+
+function selectAllTracks(isSelected) {
+  customTracks.forEach(t => t.selected = isSelected);
+  renderTracks();
+}
+
+function selectPreachingOnly() {
+  customTracks.forEach(t => {
+    const lbl = (t.label || "").toLowerCase();
+    t.selected = lbl.includes("preach") || lbl.includes("sermon") || lbl.includes("message") || lbl.includes("teaching");
+  });
+  renderTracks();
+}
+
+function selectSongsOnly() {
+  customTracks.forEach(t => {
+    const lbl = (t.label || "").toLowerCase();
+    t.selected = lbl.includes("song") || lbl.includes("worship") || lbl.includes("praise") || lbl.includes("hymn") || lbl.includes("music");
+  });
+  renderTracks();
+}
+
+function updateSelectionCountUI() {
+  const total = customTracks.length;
+  const selectedCount = customTracks.filter(t => t.selected !== false).length;
+
+  const counterEl = document.getElementById('selectedTracksCounter');
+  if (counterEl) {
+    if (total === 0) {
+      counterEl.innerText = 'No tracks added';
+    } else if (selectedCount === total) {
+      counterEl.innerText = `All ${total} tracks selected`;
+    } else {
+      counterEl.innerText = `${selectedCount} of ${total} tracks selected`;
+    }
+  }
+
+  const btnCountEl = document.getElementById('btnSelectedCount');
+  if (btnCountEl) {
+    btnCountEl.innerText = selectedCount === total ? 'All' : `${selectedCount} tracks`;
+  }
+
+  const selectAllCb = document.getElementById('selectAllCheckbox');
+  if (selectAllCb) {
+    selectAllCb.checked = total > 0 && selectedCount === total;
+    selectAllCb.indeterminate = selectedCount > 0 && selectedCount < total;
+  }
 }
 
 function nudgeTrack(index, field, delta) {
@@ -746,7 +858,7 @@ function addNewTrack(label = "", start = 0, end = 0) {
     end = Math.min(currentDuration || (start + 300), start + 300);
     label = `Track ${customTracks.length + 1}`;
   }
-  customTracks.push({ label, start, end });
+  customTracks.push({ label, start, end, selected: true });
   renderTracks();
 }
 
@@ -770,20 +882,108 @@ function previewTrack(index) {
   audioEl.addEventListener('timeupdate', onTimeUpdate);
 }
 
+// Preset: Sunday School (11 AM) + Sunday Worship Service (12 PM)
+function prefillSundaySchoolAndService() {
+  const sStart = currentStart || 3954;
+  const sEnd = currentEnd || 6136;
+  const msgTitle = (document.getElementById('metaMessageTitle') && document.getElementById('metaMessageTitle').value.trim()) || "Preaching";
+
+  const totalDur = currentDuration || (sEnd + 1800);
+  const ssEnd = Math.min(sStart, 2700);
+
+  customTracks = [
+    { label: "Sunday School Opening Praise & Prayer", start: 0, end: Math.min(300, ssEnd), selected: true },
+    { label: "Adult Sunday School Teaching", start: Math.min(300, ssEnd), end: Math.max(Math.min(300, ssEnd), ssEnd - 300), selected: true },
+    { label: "Sunday School Dismissal / Service Transition", start: Math.max(Math.min(300, ssEnd), ssEnd - 300), end: ssEnd, selected: true },
+    { label: "Worship Song 1 (Opening Praise)", start: ssEnd, end: ssEnd + Math.floor((sStart - ssEnd) * 0.35), selected: true },
+    { label: "Worship Song 2", start: ssEnd + Math.floor((sStart - ssEnd) * 0.35), end: ssEnd + Math.floor((sStart - ssEnd) * 0.70), selected: true },
+    { label: "Worship Song 3 / Congregational Praise", start: ssEnd + Math.floor((sStart - ssEnd) * 0.70), end: sStart, selected: true },
+    { label: `Preaching - ${msgTitle}`, start: sStart, end: sEnd, selected: true },
+    { label: "Altar Call Worship & Prayer", start: sEnd, end: Math.min(totalDur, sEnd + 600), selected: true },
+    { label: "Dismissal & Fellowship", start: Math.min(totalDur, sEnd + 600), end: totalDur, selected: true }
+  ];
+
+  const serviceSelect = document.getElementById('metaServiceType');
+  if (serviceSelect) {
+    serviceSelect.value = "Sunday Morning Service";
+    onServiceTypeChange("Sunday Morning Service");
+  }
+  renderTracks();
+}
+
+// Preset: Sunday Morning Worship Service (12:00 PM)
+function prefillSundayMorning() {
+  const sStart = currentStart || 1125; // approx 18m 45s
+  const sEnd = currentEnd || 3270;   // approx 54m 30s
+  const totalDur = currentDuration || (sEnd + 600);
+  const msgTitle = (document.getElementById('metaMessageTitle') && document.getElementById('metaMessageTitle').value.trim()) || "Preaching";
+
+  const songCount = 4;
+  const songDur = Math.max(120, Math.floor(sStart / songCount));
+
+  customTracks = [
+    { label: "Worship Song 1 (Opening)", start: 0, end: songDur, selected: true },
+    { label: "Worship Song 2", start: songDur, end: songDur * 2, selected: true },
+    { label: "Worship Song 3", start: songDur * 2, end: songDur * 3, selected: true },
+    { label: "Worship Song 4 / Congregational Praise", start: songDur * 3, end: sStart, selected: true },
+    { label: `Preaching - ${msgTitle}`, start: sStart, end: sEnd, selected: true },
+    { label: "Altar Call Worship & Ministry", start: sEnd, end: Math.min(totalDur, sEnd + 450), selected: true },
+    { label: "Closing Prayer & Announcements", start: Math.min(totalDur, sEnd + 450), end: totalDur, selected: true }
+  ];
+
+  const serviceSelect = document.getElementById('metaServiceType');
+  if (serviceSelect) {
+    serviceSelect.value = "Sunday Morning Service";
+    onServiceTypeChange("Sunday Morning Service");
+  }
+  renderTracks();
+}
+
+// Preset: Midweek Evening Service (Wednesday or Friday)
+function prefillMidweekService(day) {
+  const sStart = currentStart || 900; // 15 mins
+  const sEnd = currentEnd || 2700;   // 45 mins
+  const totalDur = currentDuration || (sEnd + 600);
+  const msgTitle = (document.getElementById('metaMessageTitle') && document.getElementById('metaMessageTitle').value.trim()) || `${day} Night Teaching`;
+
+  const worshipBreak = Math.floor(sStart / 2);
+
+  customTracks = [
+    { label: "Opening Worship Song 1", start: 0, end: worshipBreak, selected: true },
+    { label: "Worship Song 2 & Prayer", start: worshipBreak, end: sStart, selected: true },
+    { label: `Preaching / Bible Study - ${msgTitle}`, start: sStart, end: sEnd, selected: true },
+    { label: "Altar Call & Corporate Prayer", start: sEnd, end: Math.min(totalDur, sEnd + 480), selected: true },
+    { label: "Closing Benediction", start: Math.min(totalDur, sEnd + 480), end: totalDur, selected: true }
+  ];
+
+  const serviceSelect = document.getElementById('metaServiceType');
+  const serviceVal = `${day} Evening Service`;
+  if (serviceSelect) {
+    serviceSelect.value = serviceVal;
+    onServiceTypeChange(serviceVal);
+  }
+  renderTracks();
+}
+
 function prefillRevivalTracks() {
   customTracks = [
-    { label: "Worship Song 1 (God Will Make A Way)", start: 0, end: 277 },
-    { label: "Worship Song 2", start: 277, end: 743 },
-    { label: "Worship Song 3", start: 743, end: 955 },
-    { label: "Worship Song 4", start: 955, end: 1590 },
-    { label: "Worship Song 5", start: 1590, end: 1970 },
-    { label: "Worship Song 6", start: 1970, end: 2525 },
-    { label: "Worship Song 7 / Congregational Praise", start: 2525, end: 3954 },
-    { label: "Preaching Part 1 (Matthew 6 - One Look)", start: 3954, end: 6136 },
-    { label: "Altar Call Worship & Prayer", start: 6136, end: 6797 },
-    { label: "Preaching Part 2 (Spirit-Led Exhortation)", start: 6797, end: 8159 },
-    { label: "Testimonies & Closing Prayer", start: 8159, end: currentDuration || 10583 }
+    { label: "Worship Song 1 (God Will Make A Way)", start: 0, end: 277, selected: true },
+    { label: "Worship Song 2", start: 277, end: 743, selected: true },
+    { label: "Worship Song 3", start: 743, end: 955, selected: true },
+    { label: "Worship Song 4", start: 955, end: 1590, selected: true },
+    { label: "Worship Song 5", start: 1590, end: 1970, selected: true },
+    { label: "Worship Song 6", start: 1970, end: 2525, selected: true },
+    { label: "Worship Song 7 / Congregational Praise", start: 2525, end: 3954, selected: true },
+    { label: "Preaching Part 1 (Matthew 6 - One Look)", start: 3954, end: 6136, selected: true },
+    { label: "Altar Call Worship & Prayer", start: 6136, end: 6797, selected: true },
+    { label: "Preaching Part 2 (Spirit-Led Exhortation)", start: 6797, end: 8159, selected: true },
+    { label: "Testimonies & Closing Prayer", start: 8159, end: currentDuration || 10583, selected: true }
   ];
+  const serviceSelect = document.getElementById('metaServiceType');
+  if (serviceSelect) {
+    serviceSelect.value = "Revival / Special Service";
+    onServiceTypeChange("Revival / Special Service");
+  }
   renderTracks();
 }
 
@@ -806,12 +1006,15 @@ async function autoDetectWorshipSongs() {
       customTracks = data.songs.map(s => ({
         label: s.label,
         start: s.start,
-        end: s.end
+        end: s.end,
+        selected: true
       }));
+      const msgTitle = (document.getElementById('metaMessageTitle') && document.getElementById('metaMessageTitle').value.trim()) || "Preaching Part 1";
       customTracks.push({
-        label: "Preaching Part 1",
+        label: `Preaching - ${msgTitle}`,
         start: preachingStart,
-        end: parseTime(document.getElementById('sermonEndInput').value) || (preachingStart + 2100)
+        end: parseTime(document.getElementById('sermonEndInput').value) || (preachingStart + 2100),
+        selected: true
       });
       renderTracks();
     }
@@ -820,21 +1023,31 @@ async function autoDetectWorshipSongs() {
   }
 }
 
-async function exportCustomTracks() {
+// Export only the tracks selected with checkboxes (or all if all checked)
+async function exportSelectedTracks() {
   const audioPath = document.getElementById('audioPath').value.trim();
-  const outputDir = document.getElementById('outputDir').value.trim();
-  if (!audioPath || !outputDir) {
-    alert('Please specify the audio file path and output folder.');
+  let outputDir = document.getElementById('outputDir').value.trim();
+  if (!audioPath) {
+    alert('Please enter or upload an audio file first.');
     return;
   }
-  if (customTracks.length === 0) {
-    alert('Please add or pre-fill at least one track.');
+  if (!outputDir) {
+    outputDir = audioPath.replace(/\.[^/.]+$/, "") + "_splits";
+  }
+
+  const selectedTracks = customTracks
+    .map((t, idx) => ({ ...t, track_number: idx + 1 }))
+    .filter(t => t.selected !== false);
+
+  if (selectedTracks.length === 0) {
+    alert('Please select at least one track to export using the checkboxes.');
     return;
   }
 
   const exportBtn = document.getElementById('exportTracksBtn');
   exportBtn.disabled = true;
-  document.getElementById('exportTracksBtnText').innerText = 'Cutting & Tagging Tracks...';
+  const originalBtnHtml = document.getElementById('exportTracksBtnText').innerHTML;
+  document.getElementById('exportTracksBtnText').innerText = `Cutting & Tagging ${selectedTracks.length} Track(s)...`;
 
   const metaPayload = getMetadataPayload();
 
@@ -845,7 +1058,7 @@ async function exportCustomTracks() {
       body: JSON.stringify({
         audio_path: audioPath,
         output_dir: outputDir,
-        tracks: customTracks,
+        tracks: selectedTracks,
         metadata: metaPayload.metadata,
         cover_art_path: metaPayload.cover_art_path,
         normalize_loudness: metaPayload.normalize_loudness,
@@ -859,7 +1072,108 @@ async function exportCustomTracks() {
     alert('Export error: ' + err.message);
   } finally {
     exportBtn.disabled = false;
-    document.getElementById('exportTracksBtnText').innerText = '✂️ Export All Tracks Losslessly (-c copy)';
+    document.getElementById('exportTracksBtnText').innerHTML = originalBtnHtml;
+  }
+}
+
+// Quick export a single track by row index
+async function exportSingleTrackByIndex(index) {
+  const audioPath = document.getElementById('audioPath').value.trim();
+  let outputDir = document.getElementById('outputDir').value.trim();
+  if (!audioPath) {
+    alert('Please enter or upload an audio file first.');
+    return;
+  }
+  if (!outputDir) {
+    outputDir = audioPath.replace(/\.[^/.]+$/, "") + "_splits";
+  }
+
+  const t = customTracks[index];
+  if (!t) return;
+
+  const trackToExport = [{
+    label: t.label,
+    start: t.start,
+    end: t.end,
+    track_number: index + 1
+  }];
+
+  const metaPayload = getMetadataPayload();
+
+  try {
+    const res = await fetch('/api/export-tracks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audio_path: audioPath,
+        output_dir: outputDir,
+        tracks: trackToExport,
+        metadata: metaPayload.metadata,
+        cover_art_path: metaPayload.cover_art_path,
+        normalize_loudness: metaPayload.normalize_loudness,
+        export_mp3: metaPayload.export_mp3
+      })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    renderExportResults(data);
+  } catch (err) {
+    alert(`Failed to export track "${t.label}": ` + err.message);
+  }
+}
+
+// Quick export preaching track directly for Spotify for Creators
+async function exportPreachingOnlyQuick() {
+  const audioPath = document.getElementById('audioPath').value.trim();
+  let outputDir = document.getElementById('outputDir').value.trim();
+  if (!audioPath) {
+    alert('Please enter or upload an audio file first.');
+    return;
+  }
+  if (!outputDir) {
+    outputDir = audioPath.replace(/\.[^/.]+$/, "") + "_splits";
+  }
+
+  let preachingTracks = customTracks
+    .map((t, idx) => ({ ...t, track_number: idx + 1 }))
+    .filter(t => {
+      const lbl = (t.label || "").toLowerCase();
+      return lbl.includes("preach") || lbl.includes("sermon") || lbl.includes("message") || lbl.includes("teaching");
+    });
+
+  if (preachingTracks.length === 0) {
+    const sStart = currentStart || parseTime(document.getElementById('sermonStartInput').value) || 0;
+    const sEnd = currentEnd || parseTime(document.getElementById('sermonEndInput').value) || currentDuration;
+    const msgTitle = (document.getElementById('metaMessageTitle') && document.getElementById('metaMessageTitle').value.trim()) || "Preaching";
+    preachingTracks = [{
+      label: `Preaching - ${msgTitle}`,
+      start: sStart,
+      end: sEnd,
+      track_number: 1
+    }];
+  }
+
+  const metaPayload = getMetadataPayload();
+
+  try {
+    const res = await fetch('/api/export-tracks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audio_path: audioPath,
+        output_dir: outputDir,
+        tracks: preachingTracks,
+        metadata: metaPayload.metadata,
+        cover_art_path: metaPayload.cover_art_path,
+        normalize_loudness: metaPayload.normalize_loudness,
+        export_mp3: metaPayload.export_mp3
+      })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    renderExportResults(data);
+  } catch (err) {
+    alert('Failed to export preaching track: ' + err.message);
   }
 }
 
@@ -869,6 +1183,9 @@ async function autoExtractSermonSummary(transcript) {
   if (!transcript) return;
   const preacher = document.getElementById('metaPreacher') ? document.getElementById('metaPreacher').value.trim() : "";
   const series = document.getElementById('metaAlbum') ? document.getElementById('metaAlbum').value.trim() : "";
+  const serviceType = document.getElementById('metaServiceType') ? document.getElementById('metaServiceType').value : "";
+  const msgTitle = (document.getElementById('metaMessageTitle') && document.getElementById('metaMessageTitle').value.trim()) || 
+                   (document.getElementById('aiSermonTitle') && document.getElementById('aiSermonTitle').value.trim()) || "";
 
   try {
     const res = await fetch('/api/extract-sermon-info', {
@@ -877,7 +1194,9 @@ async function autoExtractSermonSummary(transcript) {
       body: JSON.stringify({
         transcript: transcript,
         preacher: preacher,
-        series: series
+        series: series,
+        service_type: serviceType,
+        title: msgTitle || undefined
       })
     });
     if (!res.ok) return;
@@ -899,7 +1218,9 @@ async function generateAISummary() {
   }
   const preacher = document.getElementById('metaPreacher') ? document.getElementById('metaPreacher').value.trim() : "";
   const series = document.getElementById('metaAlbum') ? document.getElementById('metaAlbum').value.trim() : "";
-  const title = document.getElementById('aiSermonTitle') ? document.getElementById('aiSermonTitle').value.trim() : "";
+  const serviceType = document.getElementById('metaServiceType') ? document.getElementById('metaServiceType').value : "";
+  const msgTitle = (document.getElementById('metaMessageTitle') && document.getElementById('metaMessageTitle').value.trim()) || 
+                   (document.getElementById('aiSermonTitle') && document.getElementById('aiSermonTitle').value.trim()) || "";
 
   try {
     const res = await fetch('/api/extract-sermon-info', {
@@ -909,7 +1230,8 @@ async function generateAISummary() {
         transcript: transcript,
         preacher: preacher,
         series: series,
-        title: title || undefined
+        service_type: serviceType,
+        title: msgTitle || undefined
       })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -925,8 +1247,14 @@ function populateAISummary(data) {
   if (section) section.classList.remove('hidden');
 
   const titleInput = document.getElementById('aiSermonTitle');
-  if (data.title && (!titleInput.value || titleInput.value.trim().length === 0)) {
-    titleInput.value = data.title;
+  const metaTitleInput = document.getElementById('metaMessageTitle');
+  if (data.title) {
+    if (titleInput && (!titleInput.value || titleInput.value.trim().length === 0)) {
+      titleInput.value = data.title;
+    }
+    if (metaTitleInput && (!metaTitleInput.value || metaTitleInput.value.trim().length === 0)) {
+      metaTitleInput.value = data.title;
+    }
   }
   
   const pillsContainer = document.getElementById('scripturePills');

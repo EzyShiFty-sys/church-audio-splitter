@@ -102,10 +102,13 @@ class ChurchAudioSplitter:
             worship_parts_to_concat.append(worship1_path)
 
         # 2. Sermon
-        sermon_filename = f"{base_name}_02_Sermon{ext}"
+        sermon_title_text = base_meta.get("title", "").strip()
+        sermon_label = f"Sermon - {sermon_title_text}" if sermon_title_text else "Sermon"
+        safe_sermon = "".join(c if (c.isalnum() or c in " -_()") else "_" for c in sermon_label).strip()
+        sermon_filename = f"{base_name}_02_{safe_sermon}{ext}"
         sermon_path = output_dir / sermon_filename
         sermon_meta = dict(base_meta)
-        sermon_meta["title"] = base_meta.get("title") or "Sermon"
+        sermon_meta["title"] = sermon_label
         sermon_meta["track"] = "2/3"
         lossless_cut(
             input_path=input_audio_path,
@@ -118,7 +121,7 @@ class ChurchAudioSplitter:
         )
         created_files.append({
             "type": "sermon",
-            "label": "Sermon",
+            "label": sermon_label,
             "filename": sermon_filename,
             "path": str(sermon_path),
             "start": sermon_start,
@@ -257,6 +260,7 @@ class ChurchAudioSplitter:
         Losslessly cuts an arbitrary list of custom labeled tracks/segments
         (e.g. Worship Song 1, Song 2, Preaching Part 1, Altar Call, Preaching Part 2, Testimonies)
         with ID3 metadata tags, album cover art, and loudness normalization.
+        Supports single track or selective track exporting.
         """
         input_audio_path = Path(input_audio_path).resolve()
         output_dir = Path(output_dir).resolve()
@@ -267,28 +271,38 @@ class ChurchAudioSplitter:
         ext = ".mp3" if export_mp3 else input_audio_path.suffix.lower()
         base_name = custom_base_name or input_audio_path.stem
         base_meta = dict(metadata or {})
+        message_title = (base_meta.get("title") or "").strip()
 
         created_files: List[Dict[str, Any]] = []
         valid_tracks = [t for t in tracks if float(t.get("end", 0.0)) > float(t.get("start", 0.0))]
         total_tracks_count = len(valid_tracks)
 
         for idx, track in enumerate(tracks, start=1):
-            label = track.get("label", f"Track_{idx}").strip()
+            track_num = int(track.get("track_number", idx))
+            label = track.get("label", f"Track_{track_num}").strip()
+            
+            # Incorporate sermon/message title if this is preaching/teaching
+            is_preach = any(w in label.lower() for w in ["preach", "sermon", "teaching", "message"])
+            if is_preach and message_title and message_title.lower() not in label.lower():
+                display_label = f"{label} - {message_title}"
+            else:
+                display_label = label
+
             # sanitize filename
-            safe_label = "".join(c if (c.isalnum() or c in " -_()") else "_" for c in label).strip()
+            safe_label = "".join(c if (c.isalnum() or c in " -_()") else "_" for c in display_label).strip()
             start_sec = max(0.0, float(track.get("start", 0.0)))
             end_sec = min(total_duration, float(track.get("end", total_duration)))
 
             if end_sec <= start_sec:
                 continue
 
-            out_filename = f"{base_name}_{idx:02d}_{safe_label}{ext}"
+            out_filename = f"{base_name}_{track_num:02d}_{safe_label}{ext}"
             out_path = output_dir / out_filename
 
             # Build metadata tags for this track
             track_meta = dict(base_meta)
-            track_meta["title"] = label
-            track_meta["track"] = f"{idx}/{total_tracks_count}"
+            track_meta["title"] = display_label
+            track_meta["track"] = f"{track_num}/{total_tracks_count}"
 
             lossless_cut(
                 input_path=input_audio_path,
@@ -301,8 +315,8 @@ class ChurchAudioSplitter:
             )
 
             created_files.append({
-                "track_number": idx,
-                "label": label,
+                "track_number": track_num,
+                "label": display_label,
                 "filename": out_filename,
                 "path": str(out_path),
                 "start": start_sec,

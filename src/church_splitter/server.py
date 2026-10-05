@@ -35,6 +35,7 @@ class TrackItem(BaseModel):
     label: str
     start: float
     end: float
+    track_number: Optional[int] = None
 
 class MultiTrackExportRequest(BaseModel):
     audio_path: str
@@ -81,6 +82,7 @@ class ExtractSermonInfoRequest(BaseModel):
     title: Optional[str] = None
     preacher: Optional[str] = None
     series: Optional[str] = None
+    service_type: Optional[str] = None
 
 class WatcherStartRequest(BaseModel):
     watch_folder: str
@@ -317,7 +319,8 @@ async def extract_sermon_info_endpoint(req: ExtractSermonInfoRequest):
             transcript=req.transcript,
             title=req.title,
             preacher=req.preacher,
-            series=req.series
+            series=req.series,
+            service_type=req.service_type
         )
         return summary
     except Exception as e:

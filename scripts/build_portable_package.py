@@ -150,30 +150,51 @@ HOW TO SET UP ON THE CHURCH COMPUTER (ONE TIME SETUP):
    on the church computer's desktop!
 
 --------------------------------------------------------------------------------
-SUNDAY SERVICE WORKFLOW:
+SERVICE WORKFLOW & NEW FEATURES:
 --------------------------------------------------------------------------------
 1. RECORD IN AUDACITY:
    - Record the church service in Audacity as usual.
    - When finished, export/save the full recording into your UGREEN NAS folder
-     (e.g., Z:\\Audacity_Recordings or \\\\UGREEN-NAS\\ChurchAudio).
+     (e.g., Z:\Audacity_Recordings or \\UGREEN-NAS\ChurchAudio).
 
 2. LAUNCH THE SPLITTER:
    - Double-click "House of Refuge Audio Splitter" on your Desktop.
-   - Your web browser will open automatically to the dashboard.
+   - Your web browser will open automatically to http://127.0.0.1:8000.
 
-3. SPLIT & TAG:
-   - Choose your service audio file (or let the Watch Folder grab it from the NAS).
-   - Enter/verify the Preacher, Series, and click the Flyer box to upload artwork.
-   - Click "✂️ Export All Tracks" or "✂️ Execute Standard 3-Way Split".
-   - The audio is sliced losslessly in seconds, with flyer artwork and metadata
-     embedded, and loudness leveled to -16 LUFS (Spotify standard).
+3. SET SERVICE TYPE & MESSAGE TITLE:
+   - Service / Event Dropdown:
+     * Sunday Morning Service (12:00 PM)
+     * Sunday School - Adult Teaching (11:00 AM)
+     * Wednesday Evening Service
+     * Friday Evening Service
+     * Revival / Special Meeting
+   - Message / Sermon Title:
+     * Type the sermon title (e.g., "One Look Is All It Took", "Walking in Faith").
+     * The title is automatically embedded into the MP3 tags, output filename,
+       and the Spotify episode notes!
 
-4. PUBLISH TO SPOTIFY FOR CREATORS & CHURCH WEBSITE:
+4. MULTI-TRACK SERVICE SPLITTING & WORSHIP SONGS:
+   - Separate every worship song sung, Sunday School teaching, preaching, and altar calls:
+     * Click a Quick Preset:
+       - "☀️ Sunday School + Service": Sets up Adult Teaching at 11 AM and Service at 12 PM
+       - "📖 Sunday Morning": Breaks opening praise into individual songs + Preaching + Altar
+       - "🕯️ Wednesday Night" / "🔥 Friday Night": Tailored for midweek prayer & teaching
+       - "🪄 Revival Meeting": Handles high-energy multi-part revival services
+       - "🎵 Auto-Detect Song Breaks": Automatically finds natural pauses between worship songs!
+   - Select Exactly Which Tracks to Export:
+     * Check or uncheck individual tracks with the [x] checkboxes.
+     * Use quick buttons: "All", "📖 Preaching Only", "🎵 Worship Songs Only", or "None".
+     * Click "✂️ Export Selected Tracks" to export only the tracks you want.
+     * Need just one specific track or song? Click "✂️ Export This" on any row!
+     * Ready for Spotify? Click "📖 Export Preaching Only (Direct for Spotify)" to get just the sermon with 1 click!
+
+5. PUBLISH TO SPOTIFY FOR CREATORS & CHURCH WEBSITE:
    - Open Spotify for Creators in your browser.
-   - Drag in the finished Sermon MP3 file.
-   - In the Splitter app, click "📋 Copy for Spotify".
+   - Drag in the finished Preaching MP3 file.
+   - In the Splitter app, click "📋 Copy for Spotify" to copy formatted scripture references,
+     key quotes, and service show notes (properly labeled with Sunday School, Wednesday, Friday, etc.).
    - Paste directly into the Spotify episode description!
-   - Grab the Spotify share link and place it on https://houseofrefugechurch.net/.
+   - Grab the Spotify episode share link and add it to https://houseofrefugechurch.net/.
 
 --------------------------------------------------------------------------------
 TECHNICAL DETAILS:

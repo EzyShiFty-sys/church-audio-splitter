@@ -125,12 +125,28 @@
           <!-- Metadata Fields -->
           <div class="meta-fields-grid">
             <div class="form-group">
-              <label for="metaPreacher">Preacher / Speaker:</label>
+              <label for="metaServiceType">Service / Event:</label>
+              <select id="metaServiceType" onchange="onServiceTypeChange(this.value)">
+                <option value="Sunday Morning Service" selected>Sunday Morning Service (12:00 PM)</option>
+                <option value="Sunday School (Adult Teaching)">Sunday School - Adult Teaching (11:00 AM)</option>
+                <option value="Wednesday Evening Service">Wednesday Evening Service</option>
+                <option value="Friday Evening Service">Friday Evening Service</option>
+                <option value="Revival / Special Service">Revival / Special Meeting</option>
+                <option value="Church Service">Custom / Other Service</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="metaMessageTitle"><strong>Message / Sermon Title:</strong></label>
+              <input type="text" id="metaMessageTitle" placeholder="e.g. One Look Is All It Took" oninput="syncMessageTitle(this.value)" style="border-color: var(--sermon-amber);" />
+              <span class="hint">Will be embedded into sermon file & Spotify notes</span>
+            </div>
+            <div class="form-group">
+              <label for="metaPreacher">Preacher / Teacher:</label>
               <input type="text" id="metaPreacher" placeholder="e.g. Pastor Tim" />
             </div>
             <div class="form-group">
-              <label for="metaAlbum">Album / Sermon Series:</label>
-              <input type="text" id="metaAlbum" placeholder="e.g. Revival Services 2026" />
+              <label for="metaAlbum">Album / Series:</label>
+              <input type="text" id="metaAlbum" value="Sunday Morning Service" />
             </div>
             <div class="form-group">
               <label for="metaYear">Year:</label>
@@ -252,26 +268,44 @@
           <div class="tracks-header">
             <div>
               <h3>🎛️ Multi-Track Service Splitter (Worship Songs & Sermon Parts)</h3>
-              <p class="section-subtitle">Split individual worship songs, multi-part preaching, altar calls, and testimonies into clean, numbered files.</p>
+              <p class="section-subtitle">Split individual worship songs, Sunday School teaching, preaching, and altar calls into clean, tagged files. Export all or pick individual tracks.</p>
             </div>
-            <div class="tracks-actions">
-              <button class="btn btn-secondary btn-small" onclick="prefillRevivalTracks()">🪄 Pre-Fill Service Tracks</button>
+            <div class="tracks-actions" style="display:flex; flex-wrap:wrap; gap:6px;">
+              <button class="btn btn-secondary btn-small" onclick="prefillSundaySchoolAndService()">☀️ Sunday School + Service</button>
+              <button class="btn btn-secondary btn-small" onclick="prefillSundayMorning()">📖 Sunday Morning</button>
+              <button class="btn btn-secondary btn-small" onclick="prefillMidweekService('Wednesday')">🕯️ Wednesday Night</button>
+              <button class="btn btn-secondary btn-small" onclick="prefillMidweekService('Friday')">🔥 Friday Night</button>
+              <button class="btn btn-secondary btn-small" onclick="prefillRevivalTracks()">🪄 Revival Meeting</button>
               <button class="btn btn-secondary btn-small" onclick="autoDetectWorshipSongs()">🎵 Auto-Detect Song Breaks</button>
               <button class="btn btn-secondary btn-small" onclick="addNewTrack()">+ Add Track</button>
             </div>
+          </div>
+
+          <!-- Selection & Filter Bar -->
+          <div class="track-selection-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; background: rgba(15,23,42,0.6); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--card-border); flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <span style="font-size: 0.82rem; color: var(--text-secondary); font-weight: 600;">Select:</span>
+              <button class="btn-micro" onclick="selectAllTracks(true)">All</button>
+              <button class="btn-micro" onclick="selectPreachingOnly()">📖 Preaching Only</button>
+              <button class="btn-micro" onclick="selectSongsOnly()">🎵 Worship Songs Only</button>
+              <button class="btn-micro" onclick="selectAllTracks(false)">None</button>
+            </div>
+            <span id="selectedTracksCounter" style="font-size: 0.85rem; color: var(--worship-blue); font-weight: 600;">All tracks selected</span>
           </div>
 
           <div class="tracks-table-wrapper">
             <table class="tracks-table">
               <thead>
                 <tr>
+                  <th style="width: 32px;"><input type="checkbox" id="selectAllCheckbox" checked onchange="selectAllTracks(this.checked)" /></th>
                   <th style="width: 35px">#</th>
                   <th>Track Title / Label</th>
                   <th style="width: 125px">Start</th>
                   <th style="width: 125px">End</th>
-                  <th style="width: 90px">Duration</th>
-                  <th style="width: 100px">Preview</th>
-                  <th style="width: 45px"></th>
+                  <th style="width: 85px">Duration</th>
+                  <th style="width: 95px">Preview</th>
+                  <th style="width: 140px; text-align: center;">Quick Export</th>
+                  <th style="width: 40px"></th>
                 </tr>
               </thead>
               <tbody id="tracksTableBody">
@@ -280,9 +314,12 @@
             </table>
           </div>
 
-          <div class="action-bar" style="margin-top: 16px;">
-            <button class="btn btn-primary btn-large" id="exportTracksBtn" onclick="exportCustomTracks()">
-              <span id="exportTracksBtnText">✂️ Export All Tracks Losslessly (-c copy)</span>
+          <div class="action-bar" style="margin-top: 16px; display: flex; gap: 12px; flex-wrap: wrap;">
+            <button class="btn btn-primary btn-large" id="exportTracksBtn" onclick="exportSelectedTracks()">
+              <span id="exportTracksBtnText">✂️ Export Selected Tracks (<span id="btnSelectedCount">All</span>)</span>
+            </button>
+            <button class="btn btn-secondary btn-large" onclick="exportPreachingOnlyQuick()">
+              <span>📖 Export Preaching Only (Direct for Spotify)</span>
             </button>
           </div>
         </div>
@@ -304,7 +341,7 @@
         <div class="ai-summary-grid">
           <div class="form-group">
             <label>Detected Sermon Title:</label>
-            <input type="text" id="aiSermonTitle" placeholder="Detected Title" />
+            <input type="text" id="aiSermonTitle" placeholder="Detected Title" oninput="syncMetaTitle(this.value)" />
           </div>
           <div class="form-group">
             <label>Detected Bible Verses:</label>

@@ -19,12 +19,19 @@ An automated, local tool designed for church media teams to take raw church serv
 
 - **🎛️ Dual Interface: Modern Web UI + Rich CLI**:
   - **Interactive Web App**:
+    - **Service & Event Selector**: Tailored presets for **Sunday Morning Service (12:00 PM)**, **Sunday School Adult Teaching (11:00 AM)**, **Wednesday Evening Service**, **Friday Evening Service**, and **Revival Meetings**.
+    - **Explicit Message Title Input**: Enter the sermon title; it is automatically burned into ID3 tags, file names, and Spotify episode notes.
+    - **Multi-Track Service & Song Break Splitter**: Isolate every individual worship song sung, Sunday School lesson, preaching, and altar call.
+    - **Selective Track Export**: Check or uncheck tracks, export only preaching, export selected songs, or click `✂️ Export This` on any individual track.
+    - **Auto-Detect Song Breaks**: Scans worship sections for musical pauses and splits distinct songs.
     - Interactive speech density timeline canvas with zone color coding.
-    - Start & End timestamp sliders and $+/- 1\text{s}, 5\text{s}$ adjustment buttons.
+    - Start & End timestamp inputs and $+/- 1\text{s}, 5\text{s}$ adjustment buttons.
     - Integrated audio player with "Listen Start/End Transition" preview buttons.
     - File upload and local path pickers.
     - Sermon transcript viewer & text export.
     - Option to combine opening and closing worship into a single joined file.
+    - **Automated UGREEN NAS Watch Folder**: Monitors incoming Audacity recording exports from the NAS and processes them automatically.
+    - **AI Scripture & Spotify Publisher**: Detects referenced Bible verses, key quotes, and formats show notes for Spotify for Creators and church website sharing.
   - **Terminal CLI (`church-split`)**:
     - Colorized progress bars and segment summary tables.
     - Batch and script-friendly execution.
@@ -33,14 +40,15 @@ An automated, local tool designed for church media teams to take raw church serv
 
 ## 📁 Output Structure
 
-When splitting `Sunday_Service.mp3`, the tool outputs:
+When splitting a church recording, the tool outputs:
 
-1. `Sunday_Service_01_Worship_Opening.mp3` &mdash; Prelude & Opening Worship Music
-2. `Sunday_Service_02_Sermon.mp3` &mdash; The Sermon / Message
-3. `Sunday_Service_03_Worship_Closing.mp3` &mdash; Response Worship, Altar Call & Benediction
-4. `Sunday_Service_Full_Worship_Combined.mp3` *(Optional)* &mdash; Losslessly concatenated worship songs
-5. `Sunday_Service_Sermon_Transcript.txt` &mdash; Full spoken sermon text with timestamps
-6. `Sunday_Service_split_summary.json` &mdash; Metadata report with exact timestamps and durations
+1. `BaseName_01_Worship Song 1.mp3` &mdash; First Worship Song
+2. `BaseName_02_Worship Song 2.mp3` &mdash; Second Worship Song
+3. `BaseName_03_Preaching - [Message Title].mp3` &mdash; Sermon / Adult Teaching
+4. `BaseName_04_Altar Call Worship.mp3` &mdash; Altar Call & Ministry Music
+5. `BaseName_05_Closing Prayer.mp3` &mdash; Dismissal & Benediction
+6. `BaseName_Sermon_Transcript.txt` &mdash; Spoken sermon text with timestamps
+7. `BaseName_split_summary.json` &mdash; Exact timestamp index report
 
 ---
 
