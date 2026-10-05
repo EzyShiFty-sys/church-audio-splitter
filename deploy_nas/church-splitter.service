@@ -1,0 +1,18 @@
+[Unit]
+Description=House of Refuge Church Audio Splitter & Spotify Engine
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/church-audio-splitter
+Environment="PYTHONPATH=/opt/church-audio-splitter/src"
+Environment="PATH=/opt/church-audio-splitter/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/opt/church-audio-splitter/venv/bin/python3 -m church_splitter.cli ui --port 8000 --host 0.0.0.0
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

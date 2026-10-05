@@ -45,7 +45,7 @@ def cli_main():
     # Command: ui
     ui_parser = subparsers.add_parser("ui", help="Launch the local interactive Web UI")
     ui_parser.add_argument("-p", "--port", type=int, default=8000, help="Port to run web server on (default: 8000)")
-    ui_parser.add_argument("--host", default="127.0.0.1", help="Host interface (default: 127.0.0.1)")
+    ui_parser.add_argument("--host", default="0.0.0.0", help="Host interface (default: 0.0.0.0)")
 
     # Default to UI if no arguments passed
     if len(sys.argv) == 1:
