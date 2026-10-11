@@ -34,23 +34,28 @@
           <div class="form-group full-width">
             <label for="audioPath">Audio File Path (.wav or .mp3):</label>
             <div class="input-with-action">
-              <input type="text" id="audioPath" placeholder="C:\Audio\Sunday_Service_2026-10-04.mp3" />
-              <button class="btn btn-secondary" id="browseFileBtn" onclick="triggerFileUpload()">Choose File...</button>
+              <input type="text" id="audioPath" placeholder="/volume1/HORPC-Main/Whole Service Recordings/2026/Your_Audio.wav" />
+              <button class="btn btn-primary" id="browseNasBtn" onclick="openNasBrowser('audioPath', 'audio')">📂 Browse NAS</button>
+              <button class="btn btn-secondary" id="browseFileBtn" onclick="triggerFileUpload()" title="Upload directly from your computer (Max 100MB over Cloudflare)">⬆️ Upload PC File</button>
               <input type="file" id="hiddenFileInput" accept=".mp3,.wav,.m4a,.aac,.flac" style="display:none;" />
             </div>
-            <span class="hint">Enter local full path or choose a file from your computer</span>
+            <span class="hint">⚡ Recommended: Click <strong>"📂 Browse NAS"</strong> to pick directly from your UGREEN storage (instant loading, zero upload wait, no 100MB limit).</span>
           </div>
 
           <div class="form-group full-width">
             <label for="outputDir">Output Destination Directory:</label>
-            <input type="text" id="outputDir" placeholder="Auto-created in source folder (or enter custom folder path)" />
-            <span class="hint">Where separated Worship Music & Sermon files will be saved</span>
+            <div class="input-with-action">
+              <input type="text" id="outputDir" placeholder="Auto-created in source folder (or enter custom folder path)" />
+              <button class="btn btn-secondary" onclick="openNasBrowser('outputDir', 'dir')">📂 Browse NAS Folder</button>
+            </div>
+            <span class="hint">Where separated Worship Music & Sermon files will be saved on your NAS</span>
           </div>
 
           <div class="form-group full-width" style="margin-top: 4px; padding-top: 10px; border-top: 1px dashed var(--card-border);">
             <label for="loadFolderInput">📂 Or Load Existing Split Folder (Play & Edit Saved Cuts):</label>
             <div class="input-with-action">
-              <input type="text" id="loadFolderInput" value="splits/Monday Service - Revival_01_All_Tracks" placeholder="Folder with split audio files" />
+              <input type="text" id="loadFolderInput" value="/volume1/HORPC-Main/Whole Service Recordings/2026" placeholder="Folder with split audio files" />
+              <button class="btn btn-secondary" onclick="openNasBrowser('loadFolderInput', 'dir')">📂 Browse NAS</button>
               <button class="btn btn-secondary" onclick="loadSavedSplitsFolder()">Load Saved Cuts</button>
             </div>
             <span class="hint">Loads all previously generated tracks with playable audio players and fine-tuning controls</span>
@@ -412,14 +417,20 @@
         <div id="watcherBody">
           <div class="form-grid">
             <div class="form-group full-width">
-              <label for="watcherWatchFolder">Watch Folder to Monitor (Local or UGREEN NAS share):</label>
-              <input type="text" id="watcherWatchFolder" placeholder="e.g. Z:\Audacity_Recordings or \\UGREEN-NAS\ChurchAudio\Inbox" />
-              <span class="hint">Path where Audacity saves your Sunday service audio file</span>
+              <label for="watcherWatchFolder">Watch Folder to Monitor (UGREEN NAS folder):</label>
+              <div class="input-with-action">
+                <input type="text" id="watcherWatchFolder" value="/volume1/HORPC-Main/Whole Service Recordings/2026" placeholder="/volume1/HORPC-Main/Whole Service Recordings/2026" />
+                <button class="btn btn-secondary" onclick="openNasBrowser('watcherWatchFolder', 'dir')">📂 Browse NAS</button>
+              </div>
+              <span class="hint">Path on UGREEN NAS where Audacity exports your church audio recordings</span>
             </div>
             <div class="form-group full-width">
-              <label for="watcherOutputFolder">Destination Folder for Completed Splits (UGREEN NAS / Cloud):</label>
-              <input type="text" id="watcherOutputFolder" placeholder="e.g. Z:\Ready_For_Spotify or \\UGREEN-NAS\ChurchAudio\Splits" />
-              <span class="hint">Where finished, tagged, and normalized sermon & worship cuts will be placed</span>
+              <label for="watcherOutputFolder">Destination Folder for Completed Splits (UGREEN NAS folder):</label>
+              <div class="input-with-action">
+                <input type="text" id="watcherOutputFolder" value="/volume1/HORPC-Main/Whole Service Recordings/2026/Auto_Splits" placeholder="/volume1/HORPC-Main/Whole Service Recordings/2026/Auto_Splits" />
+                <button class="btn btn-secondary" onclick="openNasBrowser('watcherOutputFolder', 'dir')">📂 Browse NAS</button>
+              </div>
+              <span class="hint">Where finished, tagged, and normalized sermon & worship cuts will be placed on your NAS</span>
             </div>
             <div class="form-group">
               <label for="watcherPreacher">Default Preacher / Speaker:</label>
@@ -449,6 +460,51 @@
     <footer class="app-footer">
       <p>Church Audio Splitter &bull; Lossless FFmpeg Stream Preservation &bull; Local & Offline</p>
     </footer>
+  </div>
+
+  <!-- NAS File Browser Modal -->
+  <div id="nasBrowserModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">📁</span>
+          <div>
+            <h3>UGREEN NAS File Explorer</h3>
+            <p class="modal-subtitle">Direct high-speed access to NAS storage drives</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" onclick="closeNasBrowser()">&times;</button>
+      </div>
+
+      <!-- Quick Bookmarks Bar -->
+      <div class="nas-bookmarks-bar" id="nasBookmarksBar"></div>
+
+      <!-- Path Navigator -->
+      <div class="nas-path-bar">
+        <div class="nas-path-input-group">
+          <span class="nas-path-icon">📍</span>
+          <input type="text" id="nasCurrentPathInput" class="nas-path-input" placeholder="/volume1/..." onkeydown="if(event.key==='Enter') navigateNasFolder(this.value)" />
+          <button class="btn btn-small btn-secondary" onclick="navigateNasFolder(document.getElementById('nasCurrentPathInput').value)">Go</button>
+          <button class="btn btn-small btn-secondary" id="nasUpBtn" onclick="navigateNasUp()">⬆️ Up</button>
+        </div>
+      </div>
+
+      <!-- Items List -->
+      <div class="nas-items-container" id="nasItemsContainer">
+        <div class="nas-loading">Loading NAS files...</div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="modal-footer">
+        <div class="modal-footer-info" id="nasModalFooterInfo">
+          Click an audio file to load it instantly
+        </div>
+        <div class="modal-footer-actions">
+          <button class="btn btn-secondary" onclick="closeNasBrowser()">Cancel</button>
+          <button class="btn btn-primary hidden" id="nasSelectCurrentDirBtn" onclick="selectCurrentNasDirectory()">Select This Folder</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="/static/app.js"></script>

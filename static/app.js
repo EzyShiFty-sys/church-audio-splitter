@@ -82,6 +82,213 @@ document.getElementById('hiddenFileInput').addEventListener('change', async (e) 
   }
 });
 
+// ==============================================================================
+// UGREEN NAS File Explorer Modal
+// ==============================================================================
+let nasTargetInputId = 'audioPath';
+let nasFilterMode = 'audio';
+let nasCurrentPath = '';
+let nasParentPath = null;
+
+async function openNasBrowser(targetInputId = 'audioPath', filterMode = 'audio') {
+  nasTargetInputId = targetInputId;
+  nasFilterMode = filterMode;
+  
+  const modal = document.getElementById('nasBrowserModal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+
+  const selectDirBtn = document.getElementById('nasSelectCurrentDirBtn');
+  const footerInfo = document.getElementById('nasModalFooterInfo');
+  if (filterMode === 'dir') {
+    selectDirBtn.classList.remove('hidden');
+    footerInfo.innerText = 'Navigate to desired folder and click "Select This Folder"';
+  } else {
+    selectDirBtn.classList.add('hidden');
+    footerInfo.innerText = 'Click any audio file to load it directly from your NAS';
+  }
+
+  // Determine starting folder
+  let startFolder = '';
+  const currentVal = document.getElementById(targetInputId)?.value?.trim();
+  if (currentVal && (currentVal.startsWith('/') || currentVal.includes('\\'))) {
+    startFolder = currentVal;
+  } else {
+    startFolder = '/volume1/HORPC-Main/Whole Service Recordings/2026';
+  }
+
+  await loadNasFolder(startFolder);
+}
+
+function closeNasBrowser() {
+  const modal = document.getElementById('nasBrowserModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function loadNasFolder(folderPath) {
+  const container = document.getElementById('nasItemsContainer');
+  const pathInput = document.getElementById('nasCurrentPathInput');
+  const upBtn = document.getElementById('nasUpBtn');
+  const bookmarksBar = document.getElementById('nasBookmarksBar');
+
+  container.innerHTML = '<div class="nas-loading">⏳ Reading NAS folder...</div>';
+
+  try {
+    const res = await fetch(`/api/browse-nas?folder=${encodeURIComponent(folderPath || '')}&filter_mode=${nasFilterMode}`);
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    nasCurrentPath = data.current_path;
+    nasParentPath = data.parent_path;
+    pathInput.value = data.current_path;
+
+    if (upBtn) {
+      upBtn.disabled = !data.parent_path;
+    }
+
+    // Render bookmarks
+    if (bookmarksBar && data.quick_bookmarks && data.quick_bookmarks.length > 0) {
+      bookmarksBar.innerHTML = data.quick_bookmarks.map(b => `
+        <button class="nas-bookmark-chip" onclick="loadNasFolder('${escapeJs(b.path)}')">${b.name}</button>
+      `).join('');
+    }
+
+    // Render items
+    if (!data.items || data.items.length === 0) {
+      container.innerHTML = '<div class="nas-empty">📂 No matching audio files or subfolders found in this directory.</div>';
+      return;
+    }
+
+    let html = '';
+    data.items.forEach(item => {
+      const isDir = item.is_dir;
+      const icon = isDir ? '📁' : '🎵';
+      const badgeClass = item.extension === '.wav' ? 'badge-wav' : (item.extension === '.mp3' ? 'badge-mp3' : 'badge-folder');
+      const badgeLabel = isDir ? 'DIR' : item.extension.replace('.', '').toUpperCase();
+
+      html += `
+        <div class="nas-item-row" onclick="${isDir ? `loadNasFolder('${escapeJs(item.path)}')` : `selectNasItem('${escapeJs(item.path)}')`}">
+          <div class="nas-item-info">
+            <span class="nas-item-icon">${icon}</span>
+            <span class="nas-item-name ${!isDir ? 'nas-item-audio-name' : ''}">${escapeHtml(item.name)}</span>
+          </div>
+          <div class="nas-item-meta">
+            <span class="nas-item-badge ${badgeClass}">${badgeLabel}</span>
+            <span>${item.size_str}</span>
+            <span>${item.mtime_str}</span>
+          </div>
+        </div>
+      `;
+    });
+    container.innerHTML = html;
+
+  } catch (err) {
+    container.innerHTML = `<div class="nas-empty" style="color: #f87171;">❌ Failed to load directory: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function escapeJs(str) {
+  return (str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function escapeHtml(str) {
+  return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function navigateNasFolder(target) {
+  if (target && target.trim()) {
+    loadNasFolder(target.trim());
+  }
+}
+
+function navigateNasUp() {
+  if (nasParentPath) {
+    loadNasFolder(nasParentPath);
+  }
+}
+
+function selectCurrentNasDirectory() {
+  if (!nasCurrentPath) return;
+  const input = document.getElementById(nasTargetInputId);
+  if (input) {
+    input.value = nasCurrentPath;
+  }
+  closeNasBrowser();
+}
+
+async function selectNasItem(filePath) {
+  const input = document.getElementById(nasTargetInputId);
+  if (input) {
+    input.value = filePath;
+  }
+
+  if (nasTargetInputId === 'audioPath') {
+    currentAudioPath = filePath;
+    // Set default output dir if empty
+    const outputInput = document.getElementById('outputDir');
+    if (outputInput && (!outputInput.value || outputInput.value.includes('_splits'))) {
+      outputInput.value = filePath.replace(/\.[^/.]+$/, "") + "_splits";
+    }
+
+    // Probe file info
+    try {
+      const probeRes = await fetch('/api/file-info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio_path: filePath })
+      });
+      if (probeRes.ok) {
+        const info = await probeRes.json();
+        currentDuration = info.duration;
+        if (info.resolved_path) {
+          input.value = info.resolved_path;
+          currentAudioPath = info.resolved_path;
+        }
+      }
+    } catch (e) {
+      console.warn("Probe info error:", e);
+    }
+
+    // Setup preview audio player
+    setupAudioPlayer(filePath);
+  }
+
+  closeNasBrowser();
+}
+
+// Auto-probe when user finishes typing/pasting path
+document.addEventListener('DOMContentLoaded', () => {
+  const audioPathInput = document.getElementById('audioPath');
+  if (audioPathInput) {
+    audioPathInput.addEventListener('change', async (e) => {
+      const val = e.target.value.trim();
+      if (!val) return;
+      try {
+        const probeRes = await fetch('/api/file-info', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audio_path: val })
+        });
+        if (probeRes.ok) {
+          const info = await probeRes.json();
+          currentDuration = info.duration;
+          if (info.resolved_path) {
+            e.target.value = info.resolved_path;
+            currentAudioPath = info.resolved_path;
+          }
+          const outputInput = document.getElementById('outputDir');
+          if (outputInput && !outputInput.value) {
+            outputInput.value = (info.resolved_path || val).replace(/\.[^/.]+$/, "") + "_splits";
+          }
+          setupAudioPlayer(info.resolved_path || val);
+        }
+      } catch (err) {
+        console.warn("Probe on path change error:", err);
+      }
+    });
+  }
+});
+
 function triggerCoverArtUpload() {
   document.getElementById('coverArtInput').click();
 }

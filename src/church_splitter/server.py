@@ -95,6 +95,61 @@ class WatcherStartRequest(BaseModel):
     cover_art_path: Optional[str] = None
     model_size: str = "base"
 
+class FileInfoRequest(BaseModel):
+    audio_path: str
+
+def resolve_nas_path(raw_path: str) -> Path:
+    """
+    Intelligently resolves local Linux paths, UGREEN NAS volumes,
+    Windows network shares (UNC), and relative filenames to disk paths.
+    """
+    if not raw_path:
+        return Path(".")
+    cleaned = raw_path.strip().strip('"').strip("'").replace("\\", "/")
+    
+    # 1. Exact existing path
+    p = Path(cleaned)
+    if p.exists():
+        return p
+    
+    # 2. Windows UNC network share (e.g. //192.168.0.199/HORPC-Main/... or //UGREEN/HORPC-Main/...)
+    if cleaned.startswith("//"):
+        parts = [part for part in cleaned.split("/") if part]
+        if len(parts) >= 2:
+            share_rel = "/".join(parts[1:])
+            for prefix in ["/volume1", "/volume2", "/mnt", ""]:
+                cand = Path(f"{prefix}/{share_rel}" if prefix else f"/{share_rel}")
+                if cand.exists():
+                    return cand
+
+    # 3. Windows drive letter mapping (e.g. Z:/Whole Service Recordings/2026/...)
+    if len(cleaned) >= 2 and cleaned[1] == ":":
+        rel = cleaned[2:].lstrip("/")
+        for prefix in [
+            "/volume1/HORPC-Main",
+            "/volume1/HORPC-Main/Whole Service Recordings",
+            "/volume1/HORPC-Main/Whole Service Recordings/2026",
+            "/volume1",
+            "/volume2",
+            "/mnt"
+        ]:
+            cand = Path(f"{prefix}/{rel}")
+            if cand.exists():
+                return cand
+
+    # 4. Check relative to known church audio directories
+    for prefix in [
+        "/volume1/HORPC-Main/Whole Service Recordings/2026",
+        "/volume1/HORPC-Main/Whole Service Recordings",
+        "/volume1/HORPC-Main",
+        "/volume1"
+    ]:
+        cand = Path(f"{prefix}/{cleaned.lstrip('/')}")
+        if cand.exists():
+            return cand
+
+    return p
+
 @app.get("/api/system-info")
 async def get_system_info():
     return {
@@ -102,13 +157,117 @@ async def get_system_info():
         "status": "ready"
     }
 
+@app.get("/api/browse-nas")
+async def browse_nas(
+    folder: Optional[str] = None,
+    filter_mode: Optional[str] = "audio"
+):
+    """
+    Lists directories and audio files on the UGREEN NAS filesystem for seamless
+    one-click file and folder selection without browser upload bandwidth limits.
+    """
+    default_candidates = [
+        "/volume1/HORPC-Main/Whole Service Recordings/2026",
+        "/volume1/HORPC-Main/Whole Service Recordings",
+        "/volume1/HORPC-Main",
+        "/volume1",
+        "/mnt",
+        str(Path.home()),
+        "/"
+    ]
+    
+    if not folder or folder.strip() == "":
+        target_dir = None
+        for cand in default_candidates:
+            cp = Path(cand)
+            if cp.exists() and cp.is_dir():
+                target_dir = cp
+                break
+        if not target_dir:
+            target_dir = Path("/volume1") if Path("/volume1").exists() else Path("/")
+    else:
+        target_dir = resolve_nas_path(folder)
+        if target_dir.is_file():
+            target_dir = target_dir.parent
+        elif not target_dir.exists():
+            if target_dir.parent.exists():
+                target_dir = target_dir.parent
+            else:
+                target_dir = Path("/volume1") if Path("/volume1").exists() else Path("/")
+
+    quick_bookmarks = [
+        {"name": "📅 2026 Recordings", "path": "/volume1/HORPC-Main/Whole Service Recordings/2026"},
+        {"name": "🎙️ Whole Service Recordings", "path": "/volume1/HORPC-Main/Whole Service Recordings"},
+        {"name": "⛪ HORPC-Main Share", "path": "/volume1/HORPC-Main"},
+        {"name": "💾 Volume 1 Root", "path": "/volume1"},
+    ]
+    quick_bookmarks = [b for b in quick_bookmarks if Path(b["path"]).exists()]
+
+    audio_exts = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".wma"}
+    items = []
+
+    try:
+        entries = sorted(target_dir.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+        for entry in entries:
+            if entry.name.startswith("."):
+                continue
+            is_dir = entry.is_dir()
+            ext = entry.suffix.lower()
+            is_audio = ext in audio_exts
+
+            if filter_mode == "audio" and not is_dir and not is_audio:
+                continue
+            if filter_mode == "dir" and not is_dir:
+                continue
+
+            size_str = ""
+            mtime_str = ""
+            try:
+                stat = entry.stat()
+                if not is_dir:
+                    size_mb = stat.st_size / (1024 * 1024)
+                    size_str = f"{size_mb:.1f} MB" if size_mb >= 1 else f"{stat.st_size / 1024:.0f} KB"
+                else:
+                    size_str = "Folder"
+                from datetime import datetime
+                mtime_str = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                pass
+
+            items.append({
+                "name": entry.name,
+                "path": str(entry.resolve()),
+                "is_dir": is_dir,
+                "is_audio": is_audio,
+                "extension": ext,
+                "size_str": size_str,
+                "mtime_str": mtime_str
+            })
+    except Exception as e:
+        return {
+            "current_path": str(target_dir.resolve()),
+            "parent_path": str(target_dir.parent.resolve()) if target_dir != target_dir.parent else None,
+            "items": [],
+            "quick_bookmarks": quick_bookmarks,
+            "error": str(e)
+        }
+
+    return {
+        "current_path": str(target_dir.resolve()),
+        "parent_path": str(target_dir.parent.resolve()) if target_dir != target_dir.parent else None,
+        "items": items,
+        "quick_bookmarks": quick_bookmarks
+    }
+
 @app.post("/api/file-info")
-async def probe_file(audio_path: str):
-    p = Path(audio_path)
+async def probe_file(audio_path: Optional[str] = None, req: Optional[FileInfoRequest] = None):
+    target = (req.audio_path if req else None) or audio_path or ""
+    p = resolve_nas_path(target)
     if not p.exists() or not p.is_file():
-        raise HTTPException(status_code=404, detail="Audio file not found on disk")
+        raise HTTPException(status_code=404, detail=f"Audio file not found on NAS at: {p}")
     try:
         info = get_audio_info(p)
+        info["resolved_path"] = str(p.resolve())
         return info
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -131,9 +290,10 @@ async def upload_audio_file(file: UploadFile = File(...)):
 
 @app.post("/api/analyze")
 async def analyze_audio(req: AnalyzeRequest, background_tasks: BackgroundTasks):
-    p = Path(req.audio_path)
+    p = resolve_nas_path(req.audio_path)
     if not p.exists():
-        raise HTTPException(status_code=404, detail="Audio file not found")
+        raise HTTPException(status_code=404, detail=f"Audio file not found on disk at: {p}")
+    req.audio_path = str(p.resolve())
 
     job_id = str(abs(hash(req.audio_path + str(req.model_size) + str(os.path.getmtime(p)))))
     analysis_jobs[job_id] = {
@@ -192,11 +352,11 @@ async def get_analysis_status(job_id: str):
 
 @app.post("/api/export")
 async def export_audio(req: ExportRequest):
-    input_path = Path(req.audio_path)
+    input_path = resolve_nas_path(req.audio_path)
     if not input_path.exists():
-        raise HTTPException(status_code=404, detail="Audio file not found")
+        raise HTTPException(status_code=404, detail=f"Audio file not found: {input_path}")
 
-    output_dir = Path(req.output_dir)
+    output_dir = resolve_nas_path(req.output_dir)
     try:
         splitter = ChurchAudioSplitter()
         summary = splitter.export_splits(
@@ -219,9 +379,9 @@ async def export_audio(req: ExportRequest):
 
 @app.post("/api/detect-songs")
 async def detect_songs_endpoint(req: DetectSongsRequest):
-    p = Path(req.audio_path)
+    p = resolve_nas_path(req.audio_path)
     if not p.exists():
-        raise HTTPException(status_code=404, detail="Audio file not found")
+        raise HTTPException(status_code=404, detail=f"Audio file not found: {p}")
     try:
         splitter = ChurchAudioSplitter()
         songs = splitter.detect_worship_songs(p, worship_end_sec=req.worship_end)
@@ -233,10 +393,10 @@ async def detect_songs_endpoint(req: DetectSongsRequest):
 
 @app.post("/api/export-tracks")
 async def export_tracks_endpoint(req: MultiTrackExportRequest):
-    input_path = Path(req.audio_path)
+    input_path = resolve_nas_path(req.audio_path)
     if not input_path.exists():
-        raise HTTPException(status_code=404, detail="Audio file not found")
-    output_dir = Path(req.output_dir)
+        raise HTTPException(status_code=404, detail=f"Audio file not found: {input_path}")
+    output_dir = resolve_nas_path(req.output_dir)
     try:
         splitter = ChurchAudioSplitter()
         tracks_data = [t.dict() for t in req.tracks]
@@ -258,10 +418,10 @@ async def export_tracks_endpoint(req: MultiTrackExportRequest):
 
 @app.post("/api/resplit-single-track")
 async def resplit_single_track(req: ResplitTrackRequest):
-    src = Path(req.source_audio_path)
-    dst = Path(req.output_path)
+    src = resolve_nas_path(req.source_audio_path)
+    dst = resolve_nas_path(req.output_path)
     if not src.exists():
-        raise HTTPException(status_code=404, detail="Source audio file not found")
+        raise HTTPException(status_code=404, detail=f"Source audio file not found: {src}")
     try:
         lossless_cut(
             input_path=src,
@@ -369,9 +529,9 @@ async def stop_watcher():
 
 @app.post("/api/load-split-summary")
 async def load_split_summary(req: LoadSummaryRequest):
-    p = Path(req.folder_path)
+    p = resolve_nas_path(req.folder_path)
     if not p.exists() or not p.is_dir():
-        raise HTTPException(status_code=404, detail="Directory not found")
+        raise HTTPException(status_code=404, detail=f"Directory not found on NAS: {p}")
     
     summary_files = list(p.glob("*_summary.json"))
     if summary_files:
@@ -394,7 +554,7 @@ async def load_split_summary(req: LoadSummaryRequest):
 
 @app.get("/api/audio-stream")
 async def stream_audio(path: str):
-    p = Path(path)
+    p = resolve_nas_path(path)
     if not p.exists():
         raise HTTPException(status_code=404, detail="Audio file not found")
     # Stream for local preview
