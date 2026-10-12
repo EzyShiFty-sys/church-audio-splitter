@@ -323,6 +323,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Auto-recover any running or completed analysis in case page was refreshed
   recoverActiveAnalysis();
+  refreshHistoryList();
+  checkQueueStatus();
+  setInterval(checkQueueStatus, 4000);
 });
 
 function triggerCoverArtUpload() {
@@ -420,6 +423,7 @@ function setupAudioPlayer(filePath) {
 }
 
 let activePollInterval = null;
+let currentHistoryList = [];
 
 function attachToAnalysisJob(job_id, audioPath) {
   if (activePollInterval) {
@@ -447,6 +451,7 @@ function attachToAnalysisJob(job_id, audioPath) {
 
   localStorage.setItem('activeAnalysisJobId', job_id);
   if (audioPath) localStorage.setItem('activeAudioPath', audioPath);
+  checkQueueStatus();
 
   activePollInterval = setInterval(async () => {
     try {
@@ -468,6 +473,8 @@ function attachToAnalysisJob(job_id, audioPath) {
           document.getElementById('analyzeBtnText').innerText = '⚡ Re-Analyze';
         }
         renderResults(job.result);
+        refreshHistoryList();
+        checkQueueStatus();
       } else if (job.status === 'failed') {
         clearInterval(activePollInterval);
         activePollInterval = null;
@@ -477,6 +484,7 @@ function attachToAnalysisJob(job_id, audioPath) {
           document.getElementById('analyzeBtnText').innerText = '⚡ Analyze & Detect Sermon';
         }
         alert('Analysis failed: ' + job.error);
+        checkQueueStatus();
       }
     } catch (err) {
       console.error('Polling error:', err);
@@ -490,8 +498,8 @@ async function recoverActiveAnalysis() {
     if (!res.ok) return;
     const data = await res.json();
 
-    if (data.status === 'running' && data.job_id) {
-      console.log('⚡ Re-attaching to running analysis job:', data.job_id);
+    if ((data.status === 'running' || data.status === 'queued') && data.job_id) {
+      console.log('⚡ Re-attaching to active/queued analysis job:', data.job_id);
       attachToAnalysisJob(data.job_id, data.audio_path);
     } else if (data.status === 'completed' && data.result) {
       const storedPath = localStorage.getItem('activeAudioPath');
@@ -507,6 +515,140 @@ async function recoverActiveAnalysis() {
     }
   } catch (err) {
     console.warn('Analysis recovery check error:', err);
+  }
+}
+
+async function refreshHistoryList() {
+  const select = document.getElementById('historySelect');
+  if (!select) return;
+
+  try {
+    const res = await fetch('/api/history');
+    if (!res.ok) return;
+    currentHistoryList = await res.json();
+
+    const currentVal = select.value;
+    select.innerHTML = '<option value="">-- Select past analysis to restore instantly (0s) --</option>';
+
+    if (currentHistoryList.length === 0) {
+      const emptyOpt = document.createElement('option');
+      emptyOpt.value = '';
+      emptyOpt.innerText = 'No past analyses saved yet';
+      select.appendChild(emptyOpt);
+      return;
+    }
+
+    currentHistoryList.forEach(item => {
+      const opt = document.createElement('option');
+      opt.value = item.job_id;
+      const dur = item.sermon_duration_formatted ? `(Sermon: ${item.sermon_duration_formatted})` : '';
+      const conf = item.confidence ? `• ${item.confidence}%` : '';
+      const date = item.completed_at ? `[${item.completed_at.slice(5, 16)}]` : '';
+      opt.innerText = `📖 ${item.file_name} ${dur} ${conf} ${date}`;
+      select.appendChild(opt);
+    });
+
+    if (currentVal) select.value = currentVal;
+  } catch (err) {
+    console.warn('Failed to load history list:', err);
+  }
+}
+
+async function loadFromHistory(job_id) {
+  if (!job_id) return;
+
+  try {
+    const res = await fetch(`/api/history/${encodeURIComponent(job_id)}`);
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    if (!data.result) {
+      alert('Selected analysis record does not contain result data.');
+      return;
+    }
+
+    // Set audio path
+    const audioInput = document.getElementById('audioPath');
+    if (audioInput && data.audio_path) {
+      audioInput.value = data.audio_path;
+      currentAudioPath = data.audio_path;
+      setupAudioPlayer(data.audio_path);
+    }
+
+    // Set default output dir if empty
+    const outputInput = document.getElementById('outputDir');
+    if (outputInput && !outputInput.value && data.audio_path) {
+      outputInput.value = data.audio_path.replace(/\.[^/.]+$/, "") + "_splits";
+    }
+
+    // Render results instantly in 0.0 seconds!
+    renderResults(data.result);
+
+    // Sync message title
+    if (data.file_name) {
+      const baseName = data.file_name.replace(/\.[^/.]+$/, "");
+      const metaTitle = document.getElementById('metaMessageTitle');
+      if (metaTitle && (!metaTitle.value || metaTitle.value.trim() === '')) {
+        metaTitle.value = baseName;
+      }
+    }
+
+    const progressContainer = document.getElementById('progressContainer');
+    if (progressContainer) progressContainer.classList.add('hidden');
+
+  } catch (err) {
+    alert('Failed to load analysis from history: ' + err.message);
+  }
+}
+
+async function deleteSelectedHistory() {
+  const select = document.getElementById('historySelect');
+  if (!select || !select.value) {
+    alert('Please select a past analysis from the dropdown first to delete it.');
+    return;
+  }
+  const jobId = select.value;
+  const item = currentHistoryList.find(h => h.job_id === jobId);
+  const name = item ? item.file_name : 'this analysis';
+  if (!confirm(`Are you sure you want to remove "${name}" from your analysis history?`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/history/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+    await refreshHistoryList();
+    select.value = '';
+  } catch (err) {
+    alert('Failed to delete history item: ' + err.message);
+  }
+}
+
+async function checkQueueStatus() {
+  const badge = document.getElementById('queueStatusBadge');
+  const headerStatus = document.getElementById('queueHeaderStatus');
+  if (!badge) return;
+
+  try {
+    const res = await fetch('/api/queue');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    let statusHtml = '';
+    if (data.running) {
+      const pct = Math.round((data.running.progress || 0) * 100);
+      statusHtml += `<span class="badge" style="background: #0284c7; color: #fff; font-size: 0.8rem; padding: 4px 8px;">⚡ Analyzing: ${escapeHtml(data.running.file_name)} (${pct}%)</span>`;
+    }
+    if (data.total_queued > 0) {
+      statusHtml += `<span class="badge" style="background: #f59e0b; color: #fff; font-size: 0.8rem; padding: 4px 8px;">⏳ ${data.total_queued} in Queue</span>`;
+    }
+
+    badge.innerHTML = statusHtml;
+    if (headerStatus) {
+      headerStatus.innerHTML = statusHtml;
+    }
+  } catch (err) {
+    console.warn('Queue check error:', err);
   }
 }
 
@@ -551,8 +693,9 @@ async function startAnalysis() {
       throw new Error(err.detail || 'Failed to start analysis');
     }
 
-    const { job_id } = await startRes.json();
-    attachToAnalysisJob(job_id, audioPath);
+    const data = await startRes.json();
+    attachToAnalysisJob(data.job_id, audioPath);
+    checkQueueStatus();
 
   } catch (err) {
     alert('Error: ' + err.message);

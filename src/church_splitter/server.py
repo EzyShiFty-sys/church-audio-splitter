@@ -15,10 +15,66 @@ from church_splitter.watcher import ChurchAudioWatcher
 
 app = FastAPI(title="Church Audio Splitter API")
 
-# Global active jobs store and watcher
+# Global active jobs store, queue, and watcher
 analysis_jobs: Dict[str, Dict[str, Any]] = {}
+analysis_queue: List[Dict[str, Any]] = []
+is_queue_processing: bool = False
 active_watcher: Optional[ChurchAudioWatcher] = None
 current_cover_art_path: Optional[str] = None
+
+def get_history_file() -> Path:
+    candidates = [
+        Path("/opt/church-audio-splitter/data/history.json"),
+        Path(__file__).resolve().parent.parent.parent / "data" / "history.json",
+        Path.home() / ".church_splitter_history.json"
+    ]
+    for p in candidates:
+        if p.parent.exists():
+            return p
+    return Path.home() / ".church_splitter_history.json"
+
+def load_history() -> List[Dict[str, Any]]:
+    p = get_history_file()
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def save_history_entry(entry: Dict[str, Any]):
+    try:
+        p = get_history_file()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        hist = load_history()
+        hist = [h for h in hist if h.get("job_id") != entry.get("job_id") and h.get("audio_path") != entry.get("audio_path")]
+        hist.insert(0, entry)
+        hist = hist[:60]
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(hist, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving analysis history: {e}")
+
+def delete_history_entry(job_id: str):
+    p = get_history_file()
+    if p.exists():
+        hist = [h for h in load_history() if h.get("job_id") != job_id]
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(hist, f, indent=2, ensure_ascii=False)
+
+# Populate in-memory analysis_jobs from persistent history
+for item in load_history():
+    jid = item.get("job_id")
+    if jid and jid not in analysis_jobs:
+        analysis_jobs[jid] = {
+            "status": "completed",
+            "progress": 1.0,
+            "message": "Analysis finished",
+            "audio_path": item.get("audio_path", ""),
+            "model_size": item.get("model_size", "base"),
+            "result": item.get("result")
+        }
 
 STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -298,8 +354,90 @@ async def upload_audio_file(file: UploadFile = File(...)):
         "info": info
     }
 
+def execute_analysis_job(job_id: str, req: AnalyzeRequest):
+    global is_queue_processing
+    p = resolve_nas_path(req.audio_path)
+    analysis_jobs[job_id]["status"] = "running"
+    analysis_jobs[job_id]["progress"] = 0.05
+    analysis_jobs[job_id]["message"] = "Starting speech density analysis with Whisper..."
+
+    try:
+        splitter = ChurchAudioSplitter(model_size=req.model_size)
+        def cb(pct, msg):
+            analysis_jobs[job_id]["progress"] = pct
+            analysis_jobs[job_id]["message"] = msg
+
+        res = splitter.analyze_service(
+            audio_path=p,
+            min_sermon_minutes=req.min_sermon_minutes,
+            density_threshold=req.density_threshold,
+            gap_tolerance=req.gap_tolerance,
+            padding_seconds=req.padding_seconds,
+            progress_callback=cb
+        )
+        result_dict = {
+            "sermon_start": res.sermon_start,
+            "sermon_end": res.sermon_end,
+            "sermon_duration": res.sermon_duration,
+            "total_duration": res.total_duration,
+            "confidence": res.confidence,
+            "worship_segments": res.worship_segments,
+            "timeline_density": res.timeline_density,
+            "segments": res.segments,
+            "transcript_text": res.transcript_text,
+            "sermon_transcript": res.sermon_transcript
+        }
+        analysis_jobs[job_id]["status"] = "completed"
+        analysis_jobs[job_id]["progress"] = 1.0
+        analysis_jobs[job_id]["message"] = "Analysis finished!"
+        analysis_jobs[job_id]["result"] = result_dict
+
+        import time
+        from church_splitter.splitter import format_timestamp
+        save_history_entry({
+            "job_id": job_id,
+            "audio_path": req.audio_path,
+            "file_name": p.name,
+            "model_size": req.model_size,
+            "completed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "sermon_start": res.sermon_start,
+            "sermon_end": res.sermon_end,
+            "sermon_duration": res.sermon_duration,
+            "sermon_duration_formatted": format_timestamp(res.sermon_duration),
+            "total_duration": res.total_duration,
+            "total_duration_formatted": format_timestamp(res.total_duration),
+            "confidence": round(res.confidence * 100),
+            "result": result_dict
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        analysis_jobs[job_id]["status"] = "failed"
+        analysis_jobs[job_id]["error"] = str(e)
+    finally:
+        process_next_in_queue()
+
+def process_next_in_queue():
+    global is_queue_processing
+    if not analysis_queue:
+        is_queue_processing = False
+        return
+
+    # Check if any job is currently running
+    for j in analysis_jobs.values():
+        if j.get("status") == "running":
+            is_queue_processing = True
+            return
+
+    next_item = analysis_queue.pop(0)
+    is_queue_processing = True
+    import threading
+    t = threading.Thread(target=execute_analysis_job, args=(next_item["job_id"], next_item["req"]), daemon=True)
+    t.start()
+
 @app.post("/api/analyze")
-async def analyze_audio(req: AnalyzeRequest, background_tasks: BackgroundTasks):
+async def analyze_audio(req: AnalyzeRequest):
+    global is_queue_processing
     p = resolve_nas_path(req.audio_path)
     if not p.exists():
         raise HTTPException(status_code=404, detail=f"Audio file not found on disk at: {p}")
@@ -307,17 +445,19 @@ async def analyze_audio(req: AnalyzeRequest, background_tasks: BackgroundTasks):
 
     job_id = str(abs(hash(req.audio_path + str(req.model_size) + str(os.path.getmtime(p)))))
 
-    # If this exact job is already running or completed, return it immediately!
-    if job_id in analysis_jobs:
-        existing = analysis_jobs[job_id]
-        if existing.get("status") in ("running", "completed"):
-            return {"job_id": job_id, "status": existing.get("status")}
+    # 1. If this exact job was already completed, return it immediately from cache
+    if job_id in analysis_jobs and analysis_jobs[job_id].get("status") == "completed":
+        return {"job_id": job_id, "status": "completed"}
+
+    # 2. If it's already running or queued, return its status
+    if job_id in analysis_jobs and analysis_jobs[job_id].get("status") in ("running", "queued"):
+        return {"job_id": job_id, "status": analysis_jobs[job_id].get("status")}
 
     import time
     analysis_jobs[job_id] = {
-        "status": "running",
-        "progress": 0.05,
-        "message": "Starting speech & density analysis...",
+        "status": "queued",
+        "progress": 0.0,
+        "message": "Queued for processing...",
         "audio_path": req.audio_path,
         "model_size": req.model_size,
         "started_at": time.time(),
@@ -325,45 +465,20 @@ async def analyze_audio(req: AnalyzeRequest, background_tasks: BackgroundTasks):
         "error": None
     }
 
-    def run_analysis():
-        try:
-            splitter = ChurchAudioSplitter(model_size=req.model_size)
-            
-            def cb(pct, msg):
-                analysis_jobs[job_id]["progress"] = pct
-                analysis_jobs[job_id]["message"] = msg
+    # Check if another analysis is actively running
+    is_running = any(j.get("status") == "running" for j in analysis_jobs.values())
 
-            res = splitter.analyze_service(
-                audio_path=p,
-                min_sermon_minutes=req.min_sermon_minutes,
-                density_threshold=req.density_threshold,
-                gap_tolerance=req.gap_tolerance,
-                padding_seconds=req.padding_seconds,
-                progress_callback=cb
-            )
-            analysis_jobs[job_id]["status"] = "completed"
-            analysis_jobs[job_id]["progress"] = 1.0
-            analysis_jobs[job_id]["message"] = "Analysis finished!"
-            analysis_jobs[job_id]["result"] = {
-                "sermon_start": res.sermon_start,
-                "sermon_end": res.sermon_end,
-                "sermon_duration": res.sermon_duration,
-                "total_duration": res.total_duration,
-                "confidence": res.confidence,
-                "worship_segments": res.worship_segments,
-                "timeline_density": res.timeline_density,
-                "segments": res.segments,
-                "transcript_text": res.transcript_text,
-                "sermon_transcript": res.sermon_transcript
-            }
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            analysis_jobs[job_id]["status"] = "failed"
-            analysis_jobs[job_id]["error"] = str(e)
-
-    background_tasks.add_task(run_analysis)
-    return {"job_id": job_id, "status": "running"}
+    if is_running:
+        analysis_queue.append({"job_id": job_id, "req": req})
+        queue_pos = len(analysis_queue)
+        analysis_jobs[job_id]["message"] = f"In queue (position {queue_pos})..."
+        return {"job_id": job_id, "status": "queued", "queue_position": queue_pos}
+    else:
+        is_queue_processing = True
+        import threading
+        t = threading.Thread(target=execute_analysis_job, args=(job_id, req), daemon=True)
+        t.start()
+        return {"job_id": job_id, "status": "running"}
 
 @app.get("/api/analyze-status/{job_id}")
 async def get_analysis_status(job_id: str):
@@ -376,19 +491,17 @@ async def get_active_or_latest_analysis():
     """
     Recovers running or recently completed analysis jobs after a browser refresh.
     """
-    # 1. First look for any currently running analysis
     for jid, job in reversed(list(analysis_jobs.items())):
-        if job.get("status") == "running":
+        if job.get("status") in ("running", "queued"):
             return {
                 "job_id": jid,
-                "status": "running",
+                "status": job.get("status"),
                 "progress": job.get("progress", 0.0),
                 "message": job.get("message", "Processing..."),
                 "audio_path": job.get("audio_path", ""),
                 "model_size": job.get("model_size", "base")
             }
 
-    # 2. Look for most recent completed job
     for jid, job in reversed(list(analysis_jobs.items())):
         if job.get("status") == "completed" and job.get("result"):
             return {
@@ -402,6 +515,78 @@ async def get_active_or_latest_analysis():
             }
 
     return {"job_id": None, "status": "none"}
+
+@app.get("/api/history")
+async def get_analysis_history():
+    history = load_history()
+    summary_list = []
+    for h in history:
+        summary_list.append({
+            "job_id": h.get("job_id"),
+            "file_name": h.get("file_name"),
+            "audio_path": h.get("audio_path"),
+            "model_size": h.get("model_size"),
+            "completed_at": h.get("completed_at"),
+            "sermon_duration_formatted": h.get("sermon_duration_formatted"),
+            "total_duration_formatted": h.get("total_duration_formatted"),
+            "confidence": h.get("confidence")
+        })
+    return summary_list
+
+@app.get("/api/history/{job_id}")
+async def get_history_detail(job_id: str):
+    history = load_history()
+    for h in history:
+        if h.get("job_id") == job_id:
+            return h
+    if job_id in analysis_jobs and analysis_jobs[job_id].get("result"):
+        job = analysis_jobs[job_id]
+        return {
+            "job_id": job_id,
+            "audio_path": job.get("audio_path", ""),
+            "result": job.get("result")
+        }
+    raise HTTPException(status_code=404, detail="Analysis history record not found")
+
+@app.delete("/api/history/{job_id}")
+async def remove_history_item(job_id: str):
+    delete_history_entry(job_id)
+    return {"status": "deleted"}
+
+@app.get("/api/queue")
+async def get_queue_status():
+    running_job = None
+    for jid, j in analysis_jobs.items():
+        if j.get("status") == "running":
+            running_job = {
+                "job_id": jid,
+                "audio_path": j.get("audio_path"),
+                "file_name": Path(j.get("audio_path", "")).name,
+                "progress": j.get("progress", 0.0),
+                "message": j.get("message")
+            }
+            break
+    queued_list = []
+    for item in analysis_queue:
+        queued_list.append({
+            "job_id": item["job_id"],
+            "audio_path": item["req"].audio_path,
+            "file_name": Path(item["req"].audio_path).name,
+            "model_size": item["req"].model_size
+        })
+    return {
+        "running": running_job,
+        "queue": queued_list,
+        "total_queued": len(queued_list)
+    }
+
+@app.post("/api/queue/cancel/{job_id}")
+async def cancel_queued_job(job_id: str):
+    global analysis_queue
+    analysis_queue = [q for q in analysis_queue if q["job_id"] != job_id]
+    if job_id in analysis_jobs and analysis_jobs[job_id].get("status") == "queued":
+        analysis_jobs[job_id]["status"] = "cancelled"
+    return {"status": "cancelled", "job_id": job_id}
 
 @app.post("/api/export")
 async def export_audio(req: ExportRequest):

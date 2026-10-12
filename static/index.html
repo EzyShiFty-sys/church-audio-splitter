@@ -29,7 +29,29 @@
     <main class="main-content">
       <!-- Section 1: File & Settings -->
       <section class="card config-card">
-        <h2>1. Audio Source & Settings</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+          <h2 style="margin-bottom: 0;">1. Audio Source & Settings</h2>
+          <div id="queueHeaderStatus" style="display: flex; gap: 8px; align-items: center;"></div>
+        </div>
+
+        <!-- History & Queue Bar -->
+        <div class="history-queue-bar" style="margin-bottom: 18px; background: rgba(30, 41, 59, 0.75); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--card-border, #334155); display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+          <div style="display: flex; gap: 10px; align-items: center; flex: 1; min-width: 290px;">
+            <span style="font-size: 1.2rem;">📜</span>
+            <div style="display: flex; flex-direction: column; flex: 1;">
+              <label for="historySelect" style="margin-bottom: 3px; font-size: 0.82rem; font-weight: 600; color: #94a3b8;">Past Analysis History (Instant 0s Restore):</label>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <select id="historySelect" onchange="loadFromHistory(this.value)" style="flex: 1; padding: 6px 10px; font-size: 0.85rem; border-radius: 6px; background: #0f172a; color: #f8fafc; border: 1px solid #334155;">
+                  <option value="">-- Select past analysis to restore instantly (0s) --</option>
+                </select>
+                <button class="btn btn-secondary btn-small" onclick="refreshHistoryList()" title="Refresh history" style="padding: 5px 8px;">🔄</button>
+                <button class="btn btn-secondary btn-small" id="deleteCurrentHistoryBtn" onclick="deleteSelectedHistory()" title="Delete selected history item" style="padding: 5px 8px; color: #f87171;">🗑️</button>
+              </div>
+            </div>
+          </div>
+          <div id="queueStatusBadge" style="display: flex; gap: 8px; align-items: center;"></div>
+        </div>
+
         <div class="form-grid">
           <div class="form-group full-width">
             <label for="audioPath">Audio File Path (.wav or .mp3):</label>
