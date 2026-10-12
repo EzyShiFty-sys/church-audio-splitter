@@ -1131,11 +1131,21 @@ pre {
   border-radius: 6px;
   cursor: pointer;
   border-bottom: 1px solid rgba(51, 65, 85, 0.4);
-  transition: background 0.12s ease;
+  transition: all 0.12s ease;
 }
 
 .nas-item-row:hover {
   background: #334155;
+}
+
+.nas-item-row.is-audio-file {
+  background: rgba(56, 189, 248, 0.08);
+  border-left: 3px solid #38bdf8;
+  margin-bottom: 2px;
+}
+
+.nas-item-row.is-audio-file:hover {
+  background: rgba(56, 189, 248, 0.22);
 }
 
 .nas-item-info {

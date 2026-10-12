@@ -90,6 +90,8 @@ let nasFilterMode = 'audio';
 let nasCurrentPath = '';
 let nasParentPath = null;
 
+let nasLoadedItems = [];
+
 async function openNasBrowser(targetInputId = 'audioPath', filterMode = 'audio') {
   nasTargetInputId = targetInputId;
   nasFilterMode = filterMode;
@@ -97,6 +99,9 @@ async function openNasBrowser(targetInputId = 'audioPath', filterMode = 'audio')
   const modal = document.getElementById('nasBrowserModal');
   if (!modal) return;
   modal.classList.remove('hidden');
+
+  const filterInput = document.getElementById('nasFilterInput');
+  if (filterInput) filterInput.value = '';
 
   const selectDirBtn = document.getElementById('nasSelectCurrentDirBtn');
   const footerInfo = document.getElementById('nasModalFooterInfo');
@@ -130,7 +135,9 @@ async function loadNasFolder(folderPath) {
   const pathInput = document.getElementById('nasCurrentPathInput');
   const upBtn = document.getElementById('nasUpBtn');
   const bookmarksBar = document.getElementById('nasBookmarksBar');
+  const filterInput = document.getElementById('nasFilterInput');
 
+  if (filterInput) filterInput.value = '';
   container.innerHTML = '<div class="nas-loading">⏳ Reading NAS folder...</div>';
 
   try {
@@ -153,38 +160,64 @@ async function loadNasFolder(folderPath) {
       `).join('');
     }
 
-    // Render items
-    if (!data.items || data.items.length === 0) {
-      container.innerHTML = '<div class="nas-empty">📂 No matching audio files or subfolders found in this directory.</div>';
-      return;
-    }
-
-    let html = '';
-    data.items.forEach(item => {
-      const isDir = item.is_dir;
-      const icon = isDir ? '📁' : '🎵';
-      const badgeClass = item.extension === '.wav' ? 'badge-wav' : (item.extension === '.mp3' ? 'badge-mp3' : 'badge-folder');
-      const badgeLabel = isDir ? 'DIR' : item.extension.replace('.', '').toUpperCase();
-
-      html += `
-        <div class="nas-item-row" onclick="${isDir ? `loadNasFolder('${escapeJs(item.path)}')` : `selectNasItem('${escapeJs(item.path)}')`}">
-          <div class="nas-item-info">
-            <span class="nas-item-icon">${icon}</span>
-            <span class="nas-item-name ${!isDir ? 'nas-item-audio-name' : ''}">${escapeHtml(item.name)}</span>
-          </div>
-          <div class="nas-item-meta">
-            <span class="nas-item-badge ${badgeClass}">${badgeLabel}</span>
-            <span>${item.size_str}</span>
-            <span>${item.mtime_str}</span>
-          </div>
-        </div>
-      `;
-    });
-    container.innerHTML = html;
+    nasLoadedItems = data.items || [];
+    renderNasItemsList(nasLoadedItems);
 
   } catch (err) {
+    nasLoadedItems = [];
     container.innerHTML = `<div class="nas-empty" style="color: #f87171;">❌ Failed to load directory: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+function filterNasItems(query) {
+  if (!query || !query.trim()) {
+    renderNasItemsList(nasLoadedItems);
+    return;
+  }
+  const q = query.trim().toLowerCase();
+  const filtered = nasLoadedItems.filter(item => item.name.toLowerCase().includes(q));
+  renderNasItemsList(filtered);
+}
+
+function renderNasItemsList(items) {
+  const container = document.getElementById('nasItemsContainer');
+  const countBadge = document.getElementById('nasItemCountBadge');
+  if (!container) return;
+
+  const audioCount = items.filter(i => !i.is_dir).length;
+  const folderCount = items.filter(i => i.is_dir).length;
+  if (countBadge) {
+    countBadge.innerText = `${audioCount} audio files, ${folderCount} folders`;
+  }
+
+  if (!items || items.length === 0) {
+    container.innerHTML = '<div class="nas-empty">📂 No matching audio files or subfolders found in this directory.</div>';
+    return;
+  }
+
+  let html = '';
+  items.forEach(item => {
+    const isDir = item.is_dir;
+    const icon = isDir ? '📁' : '🎵';
+    const badgeClass = item.extension === '.wav' ? 'badge-wav' : (item.extension === '.mp3' ? 'badge-mp3' : 'badge-folder');
+    const badgeLabel = isDir ? 'DIR' : item.extension.replace('.', '').toUpperCase();
+    const rowClass = !isDir ? 'nas-item-row is-audio-file' : 'nas-item-row';
+
+    html += `
+      <div class="${rowClass}" onclick="${isDir ? `loadNasFolder('${escapeJs(item.path)}')` : `selectNasItem('${escapeJs(item.path)}')`}">
+        <div class="nas-item-info">
+          <span class="nas-item-icon">${icon}</span>
+          <span class="nas-item-name ${!isDir ? 'nas-item-audio-name' : ''}">${escapeHtml(item.name)}</span>
+        </div>
+        <div class="nas-item-meta">
+          <span class="nas-item-badge ${badgeClass}">${badgeLabel}</span>
+          <span>${item.size_str}</span>
+          <span>${item.mtime_str}</span>
+        </div>
+      </div>
+    `;
+  });
+  container.innerHTML = html;
 }
 
 function escapeJs(str) {

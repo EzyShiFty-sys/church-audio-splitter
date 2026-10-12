@@ -489,6 +489,13 @@
         </div>
       </div>
 
+      <!-- Live Search & Filter Bar -->
+      <div class="nas-search-bar" style="padding: 8px 16px; background: rgba(15, 23, 42, 0.5); border-bottom: 1px solid var(--card-border, #334155); display: flex; gap: 10px; align-items: center;">
+        <span style="font-size: 1rem;">🔍</span>
+        <input type="text" id="nasFilterInput" class="nas-path-input" placeholder="Type to filter files & folders (e.g. Sunday, 10-11, wav)..." oninput="filterNasItems(this.value)" style="flex: 1;" />
+        <span id="nasItemCountBadge" style="font-size: 0.82rem; color: #94a3b8; font-weight: 500; white-space: nowrap;"></span>
+      </div>
+
       <!-- Items List -->
       <div class="nas-items-container" id="nasItemsContainer">
         <div class="nas-loading">Loading NAS files...</div>

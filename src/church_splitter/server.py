@@ -203,11 +203,11 @@ async def browse_nas(
     ]
     quick_bookmarks = [b for b in quick_bookmarks if Path(b["path"]).exists()]
 
-    audio_exts = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".wma"}
+    audio_exts = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".wma", ".opus", ".m4b", ".mp4"}
     items = []
 
     try:
-        entries = sorted(target_dir.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+        entries = list(target_dir.iterdir())
         for entry in entries:
             if entry.name.startswith("."):
                 continue
@@ -222,8 +222,10 @@ async def browse_nas(
 
             size_str = ""
             mtime_str = ""
+            mtime_epoch = 0.0
             try:
                 stat = entry.stat()
+                mtime_epoch = stat.st_mtime
                 if not is_dir:
                     size_mb = stat.st_size / (1024 * 1024)
                     size_str = f"{size_mb:.1f} MB" if size_mb >= 1 else f"{stat.st_size / 1024:.0f} KB"
@@ -241,8 +243,16 @@ async def browse_nas(
                 "is_audio": is_audio,
                 "extension": ext,
                 "size_str": size_str,
-                "mtime_str": mtime_str
+                "mtime_str": mtime_str,
+                "mtime_epoch": mtime_epoch
             })
+
+        # Sorting: In 'audio' mode, audio files are prioritized at the top, then folders.
+        # Within each group, sort newest (mtime) first so recent recordings are front and center.
+        if filter_mode == "audio":
+            items.sort(key=lambda x: (not x["is_audio"], -x.get("mtime_epoch", 0.0), x["name"].lower()))
+        else:
+            items.sort(key=lambda x: (not x["is_dir"], -x.get("mtime_epoch", 0.0), x["name"].lower()))
     except Exception as e:
         return {
             "current_path": str(target_dir.resolve()),
