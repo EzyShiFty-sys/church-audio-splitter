@@ -320,6 +320,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // Auto-recover any running or completed analysis in case page was refreshed
+  recoverActiveAnalysis();
 });
 
 function triggerCoverArtUpload() {
@@ -416,6 +419,97 @@ function setupAudioPlayer(filePath) {
   audioEl.src = `/api/audio-stream?path=${encodeURIComponent(filePath)}`;
 }
 
+let activePollInterval = null;
+
+function attachToAnalysisJob(job_id, audioPath) {
+  if (activePollInterval) {
+    clearInterval(activePollInterval);
+    activePollInterval = null;
+  }
+
+  const progressContainer = document.getElementById('progressContainer');
+  const progressStatus = document.getElementById('progressStatus');
+  const progressPercent = document.getElementById('progressPercent');
+  const progressBarFill = document.getElementById('progressBarFill');
+  const analyzeBtn = document.getElementById('analyzeBtn');
+
+  if (progressContainer) progressContainer.classList.remove('hidden');
+  if (analyzeBtn) {
+    analyzeBtn.disabled = true;
+    document.getElementById('analyzeBtnText').innerText = 'Analyzing...';
+  }
+  if (audioPath) {
+    const audioInput = document.getElementById('audioPath');
+    if (audioInput && !audioInput.value) audioInput.value = audioPath;
+    currentAudioPath = audioPath;
+    setupAudioPlayer(audioPath);
+  }
+
+  localStorage.setItem('activeAnalysisJobId', job_id);
+  if (audioPath) localStorage.setItem('activeAudioPath', audioPath);
+
+  activePollInterval = setInterval(async () => {
+    try {
+      const pollRes = await fetch(`/api/analyze-status/${job_id}`);
+      if (!pollRes.ok) return;
+      const job = await pollRes.json();
+
+      const pct = Math.round((job.progress || 0) * 100);
+      if (progressPercent) progressPercent.innerText = `${pct}%`;
+      if (progressBarFill) progressBarFill.style.width = `${pct}%`;
+      if (progressStatus) progressStatus.innerText = job.message || 'Processing audio with Whisper...';
+
+      if (job.status === 'completed') {
+        clearInterval(activePollInterval);
+        activePollInterval = null;
+        localStorage.removeItem('activeAnalysisJobId');
+        if (analyzeBtn) {
+          analyzeBtn.disabled = false;
+          document.getElementById('analyzeBtnText').innerText = '⚡ Re-Analyze';
+        }
+        renderResults(job.result);
+      } else if (job.status === 'failed') {
+        clearInterval(activePollInterval);
+        activePollInterval = null;
+        localStorage.removeItem('activeAnalysisJobId');
+        if (analyzeBtn) {
+          analyzeBtn.disabled = false;
+          document.getElementById('analyzeBtnText').innerText = '⚡ Analyze & Detect Sermon';
+        }
+        alert('Analysis failed: ' + job.error);
+      }
+    } catch (err) {
+      console.error('Polling error:', err);
+    }
+  }, 1000);
+}
+
+async function recoverActiveAnalysis() {
+  try {
+    const res = await fetch('/api/analysis/active');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (data.status === 'running' && data.job_id) {
+      console.log('⚡ Re-attaching to running analysis job:', data.job_id);
+      attachToAnalysisJob(data.job_id, data.audio_path);
+    } else if (data.status === 'completed' && data.result) {
+      const storedPath = localStorage.getItem('activeAudioPath');
+      if (storedPath && (storedPath === data.audio_path || !detectedResult)) {
+        console.log('⚡ Restoring recently completed analysis result');
+        const audioInput = document.getElementById('audioPath');
+        if (audioInput && !audioInput.value) audioInput.value = data.audio_path;
+        currentAudioPath = data.audio_path;
+        setupAudioPlayer(data.audio_path);
+        renderResults(data.result);
+        localStorage.removeItem('activeAnalysisJobId');
+      }
+    }
+  } catch (err) {
+    console.warn('Analysis recovery check error:', err);
+  }
+}
+
 async function startAnalysis() {
   const audioPath = document.getElementById('audioPath').value.trim();
   if (!audioPath) {
@@ -430,14 +524,13 @@ async function startAnalysis() {
   const paddingSec = parseFloat(document.getElementById('paddingSec').value) || 2.0;
 
   const progressContainer = document.getElementById('progressContainer');
-  const progressStatus = document.getElementById('progressStatus');
-  const progressPercent = document.getElementById('progressPercent');
-  const progressBarFill = document.getElementById('progressBarFill');
   const analyzeBtn = document.getElementById('analyzeBtn');
 
-  progressContainer.classList.remove('hidden');
-  analyzeBtn.disabled = true;
-  document.getElementById('analyzeBtnText').innerText = 'Analyzing...';
+  if (progressContainer) progressContainer.classList.remove('hidden');
+  if (analyzeBtn) {
+    analyzeBtn.disabled = true;
+    document.getElementById('analyzeBtnText').innerText = 'Analyzing...';
+  }
   setupAudioPlayer(audioPath);
 
   try {
@@ -459,39 +552,14 @@ async function startAnalysis() {
     }
 
     const { job_id } = await startRes.json();
-
-    // Poll status
-    const pollInterval = setInterval(async () => {
-      try {
-        const pollRes = await fetch(`/api/analyze-status/${job_id}`);
-        if (!pollRes.ok) return;
-        const job = await pollRes.json();
-
-        const pct = Math.round(job.progress * 100);
-        progressPercent.innerText = `${pct}%`;
-        progressBarFill.style.width = `${pct}%`;
-        progressStatus.innerText = job.message || 'Processing...';
-
-        if (job.status === 'completed') {
-          clearInterval(pollInterval);
-          analyzeBtn.disabled = false;
-          document.getElementById('analyzeBtnText').innerText = '⚡ Re-Analyze';
-          renderResults(job.result);
-        } else if (job.status === 'failed') {
-          clearInterval(pollInterval);
-          analyzeBtn.disabled = false;
-          document.getElementById('analyzeBtnText').innerText = '⚡ Analyze & Detect Sermon';
-          alert('Analysis failed: ' + job.error);
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
-      }
-    }, 1000);
+    attachToAnalysisJob(job_id, audioPath);
 
   } catch (err) {
     alert('Error: ' + err.message);
-    analyzeBtn.disabled = false;
-    document.getElementById('analyzeBtnText').innerText = '⚡ Analyze & Detect Sermon';
+    if (analyzeBtn) {
+      analyzeBtn.disabled = false;
+      document.getElementById('analyzeBtnText').innerText = '⚡ Analyze & Detect Sermon';
+    }
   }
 }
 

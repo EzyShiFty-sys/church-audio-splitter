@@ -306,10 +306,21 @@ async def analyze_audio(req: AnalyzeRequest, background_tasks: BackgroundTasks):
     req.audio_path = str(p.resolve())
 
     job_id = str(abs(hash(req.audio_path + str(req.model_size) + str(os.path.getmtime(p)))))
+
+    # If this exact job is already running or completed, return it immediately!
+    if job_id in analysis_jobs:
+        existing = analysis_jobs[job_id]
+        if existing.get("status") in ("running", "completed"):
+            return {"job_id": job_id, "status": existing.get("status")}
+
+    import time
     analysis_jobs[job_id] = {
         "status": "running",
         "progress": 0.05,
-        "message": "Starting analysis...",
+        "message": "Starting speech & density analysis...",
+        "audio_path": req.audio_path,
+        "model_size": req.model_size,
+        "started_at": time.time(),
         "result": None,
         "error": None
     }
@@ -352,13 +363,45 @@ async def analyze_audio(req: AnalyzeRequest, background_tasks: BackgroundTasks):
             analysis_jobs[job_id]["error"] = str(e)
 
     background_tasks.add_task(run_analysis)
-    return {"job_id": job_id}
+    return {"job_id": job_id, "status": "running"}
 
 @app.get("/api/analyze-status/{job_id}")
 async def get_analysis_status(job_id: str):
     if job_id not in analysis_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     return analysis_jobs[job_id]
+
+@app.get("/api/analysis/active")
+async def get_active_or_latest_analysis():
+    """
+    Recovers running or recently completed analysis jobs after a browser refresh.
+    """
+    # 1. First look for any currently running analysis
+    for jid, job in reversed(list(analysis_jobs.items())):
+        if job.get("status") == "running":
+            return {
+                "job_id": jid,
+                "status": "running",
+                "progress": job.get("progress", 0.0),
+                "message": job.get("message", "Processing..."),
+                "audio_path": job.get("audio_path", ""),
+                "model_size": job.get("model_size", "base")
+            }
+
+    # 2. Look for most recent completed job
+    for jid, job in reversed(list(analysis_jobs.items())):
+        if job.get("status") == "completed" and job.get("result"):
+            return {
+                "job_id": jid,
+                "status": "completed",
+                "progress": 1.0,
+                "message": "Analysis finished",
+                "audio_path": job.get("audio_path", ""),
+                "model_size": job.get("model_size", "base"),
+                "result": job.get("result")
+            }
+
+    return {"job_id": None, "status": "none"}
 
 @app.post("/api/export")
 async def export_audio(req: ExportRequest):
