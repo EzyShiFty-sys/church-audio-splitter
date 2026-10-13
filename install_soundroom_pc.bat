@@ -13,20 +13,20 @@ echo.
 :: 1. Check Python installation
 echo [*] Checking for Python...
 where python >nul 2>nul
-if %ERRORLEVEL% neq 0 (
+if errorlevel 1 (
     echo [!] Python was not found in PATH!
-    echo [*] Attempting to install Python 3.11 via Windows Package Manager (winget)...
+    echo [*] Attempting to install Python 3.11 via winget...
     where winget >nul 2>nul
-    if %ERRORLEVEL% equ 0 (
+    if errorlevel 1 (
+        echo [ERROR] Please install Python 3.10 or newer from python.org
+        echo Make sure to check the box: Add Python to PATH!
+        pause
+        exit /b 1
+    ) else (
         winget install Python.Python.3.11 --silent --accept-package-agreements --accept-source-agreements
         echo [*] Python installed. Please RESTART this installer so PATH updates.
         pause
         exit /b 0
-    ) else (
-        echo [ERROR] Please install Python 3.10+ from https://www.python.org/downloads/
-        echo Make sure to CHECK THE BOX: "Add Python to PATH" during installation!
-        pause
-        exit /b 1
     )
 )
 
@@ -36,15 +36,15 @@ echo [OK] Detected %PY_VER%
 :: 2. Check FFmpeg installation
 echo [*] Checking for FFmpeg...
 where ffmpeg >nul 2>nul
-if %ERRORLEVEL% neq 0 (
+if errorlevel 1 (
     echo [!] FFmpeg not found in standard PATH.
     echo [*] Trying winget install Gyan.FFmpeg...
     where winget >nul 2>nul
-    if %ERRORLEVEL% equ 0 (
+    if not errorlevel 1 (
         winget install Gyan.FFmpeg --silent --accept-package-agreements --accept-source-agreements
         echo [OK] FFmpeg installed via winget.
     ) else (
-        echo [!] Warning: FFmpeg not detected. If splits fail, install FFmpeg or place ffmpeg.exe in this folder.
+        echo [!] Warning: FFmpeg not detected via winget.
     )
 ) else (
     echo [OK] FFmpeg found!
@@ -55,7 +55,7 @@ echo.
 echo [*] Setting up local Python Virtual Environment (venv)...
 if not exist "venv\Scripts\python.exe" (
     python -m venv venv
-    if %ERRORLEVEL% neq 0 (
+    if errorlevel 1 (
         echo [ERROR] Failed to create venv. Make sure Python venv is available.
         pause
         exit /b 1
@@ -67,31 +67,19 @@ if not exist "venv\Scripts\python.exe" (
 
 :: 4. Upgrade pip and install dependencies
 echo.
-echo [*] Installing dependencies (FastAPI, Faster-Whisper, PyTorch/CTranslate2)...
-echo [*] This takes 1-2 minutes depending on your internet connection...
+echo [*] Installing dependencies: FastAPI, Faster-Whisper, PyTorch/CTranslate2...
+echo [*] This takes 1-3 minutes depending on your internet connection...
 venv\Scripts\python.exe -m pip install --upgrade pip
 venv\Scripts\python.exe -m pip install -r requirements.txt
-if %ERRORLEVEL% neq 0 (
-    echo [!] Retrying with pyproject...
+if errorlevel 1 (
+    echo [!] requirements.txt install reported an issue, trying pip install . ...
     venv\Scripts\python.exe -m pip install .
 )
 
-:: 5. Create Desktop Shortcut
+:: 5. Create Desktop Shortcut via PowerShell
 echo.
 echo [*] Creating Desktop Shortcut...
-set "SHORTCUT_SCRIPT=%TEMP%\create_cas_shortcut.vbs"
-set "TARGET_BAT=%~dp0START_CHURCH_SPLITTER.bat"
-(
-    echo Set oWS = WScript.CreateObject^("WScript.Shell"^)
-    echo sLinkFile = oWS.SpecialFolders^("Desktop"^) ^& "\Church Audio Splitter.lnk"
-    echo Set oLink = oWS.CreateShortcut^(sLinkFile^)
-    echo oLink.TargetPath = "%TARGET_BAT%"
-    echo oLink.WorkingDirectory = "%~dp0"
-    echo oLink.Description = "Launch Church Audio Splitter Dashboard"
-    echo oLink.Save
-) > "%SHORTCUT_SCRIPT%"
-cscript //nologo "%SHORTCUT_SCRIPT%" >nul 2>nul
-del "%SHORTCUT_SCRIPT%" 2>nul
+powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'Church Audio Splitter.lnk')); $s.TargetPath = '%~dp0START_CHURCH_SPLITTER.bat'; $s.WorkingDirectory = '%~dp0'; $s.Description = 'Launch Church Audio Splitter Dashboard'; $s.Save()"
 echo [OK] Desktop shortcut "Church Audio Splitter" created!
 
 echo.
