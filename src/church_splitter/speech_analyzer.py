@@ -109,55 +109,36 @@ class ChurchAudioAnalyzer:
             model = self._get_model()
 
             if progress_callback:
-                progress_callback(0.20, "Transcribing and detecting speech timestamps...")
+                progress_callback(0.20, "Transcribing speech stream...")
 
-            def get_transcribe_iterator():
-                nonlocal model
-                try:
-                    seg_iter, _ = model.transcribe(
-                        tmp_wav_path,
-                        beam_size=1,
-                        word_timestamps=False,
-                        vad_filter=True,
-                        vad_parameters=dict(
-                            min_silence_duration_ms=500,
-                            speech_pad_ms=200
-                        )
-                    )
-                    first_item = next(seg_iter, None)
-                    return seg_iter, first_item
-                except Exception as e:
-                    # If CUDA runtime failed (e.g. missing cublas64_12.dll), recreate on CPU
-                    if "cublas" in str(e).lower() or "cuda" in str(e).lower():
-                        self._model = WhisperModel(
-                            self.model_size,
-                            device="cpu",
-                            compute_type="int8",
-                            cpu_threads=os.cpu_count() or 4
-                        )
-                        model = self._model
-                        seg_iter, _ = model.transcribe(
-                            tmp_wav_path,
-                            beam_size=1,
-                            word_timestamps=False,
-                            vad_filter=True,
-                            vad_parameters=dict(
-                                min_silence_duration_ms=500,
-                                speech_pad_ms=200
-                            )
-                        )
-                        first_item = next(seg_iter, None)
-                        return seg_iter, first_item
-                    raise e
-
-            seg_iter, first_item = get_transcribe_iterator()
-            import itertools
-            raw_stream = itertools.chain([first_item] if first_item is not None else [], seg_iter)
+            # Transcribe directly without vad_filter pre-scan to stream progress instantly
+            try:
+                seg_iter, _ = model.transcribe(
+                    tmp_wav_path,
+                    beam_size=1,
+                    word_timestamps=False,
+                    vad_filter=False
+                )
+            except Exception as e:
+                # If GPU/CUDA error, fallback to CPU
+                self._model = WhisperModel(
+                    self.model_size,
+                    device="cpu",
+                    compute_type="int8",
+                    cpu_threads=min(os.cpu_count() or 4, 3)
+                )
+                model = self._model
+                seg_iter, _ = model.transcribe(
+                    tmp_wav_path,
+                    beam_size=1,
+                    word_timestamps=False,
+                    vad_filter=False
+                )
 
             speech_segments: List[SpeechSegment] = []
             all_text_parts: List[str] = []
 
-            for seg in raw_stream:
+            for seg in seg_iter:
                 cleaned_text = seg.text.strip()
                 words = cleaned_text.split()
                 speech_segments.append(
