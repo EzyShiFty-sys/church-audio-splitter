@@ -13,7 +13,13 @@ DEFAULT_GAP_TOLERANCE_SECONDS = 45.0  # Allow gaps (scripture reading pauses, la
 DEFAULT_PADDING_SECONDS = 2.0  # Cushion buffer in seconds around cuts
 
 def find_ffmpeg() -> str:
-    """Finds ffmpeg binary in PATH or common Windows winget installation paths."""
+    """Finds ffmpeg binary in local bin, PATH, or common Windows winget installation paths."""
+    # Check local application bin directory
+    app_root = Path(__file__).resolve().parent.parent.parent
+    local_bin = app_root / "bin" / "ffmpeg.exe"
+    if local_bin.is_file():
+        return str(local_bin)
+
     # Check standard PATH
     path = shutil.which("ffmpeg")
     if path:
@@ -38,7 +44,12 @@ def find_ffmpeg() -> str:
     return "ffmpeg"
 
 def find_ffprobe() -> str:
-    """Finds ffprobe binary in PATH or common Windows winget installation paths."""
+    """Finds ffprobe binary in local bin, PATH, or common Windows winget installation paths."""
+    app_root = Path(__file__).resolve().parent.parent.parent
+    local_probe = app_root / "bin" / "ffprobe.exe"
+    if local_probe.is_file():
+        return str(local_probe)
+
     path = shutil.which("ffprobe")
     if path:
         return path

@@ -17,7 +17,8 @@ if not exist "venv\Scripts\python.exe" (
     exit /b 0
 )
 
-:: Add potential FFmpeg paths to session PATH
+:: Add local bin folder and potential WinGet FFmpeg paths to session PATH
+if exist "%~dp0bin" set "PATH=%~dp0bin;!PATH!"
 for /d %%d in ("%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg*") do (
     for /d %%b in ("%%d\ffmpeg-*\bin") do (
         set "PATH=%%b;!PATH!"
