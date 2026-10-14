@@ -32,22 +32,44 @@ if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
 if "%PY_CMD%"=="" (
     echo [!] Python 3.10+ was not found on this system.
     echo [*] Downloading official Python 3.11 64-bit installer from python.org...
-    powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $wc = New-Object System.Net.WebClient; $wc.DownloadFile('https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe', '$env:TEMP\python_setup.exe')"
     
-    if not exist "%TEMP%\python_setup.exe" (
-        echo [ERROR] Automatic download failed. Please manually install Python 3.11 from:
-        echo https://www.python.org/downloads/
-        echo (Make sure to check: 'Add Python to PATH')
-        pause
-        exit /b 1
+    :: Try curl first (built into Windows, fast and handles Fastly/CDN redirects)
+    where curl >nul 2>nul
+    if not errorlevel 1 (
+        curl.exe -fSL -o "%TEMP%\python_setup.exe" "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
     )
     
-    echo [*] Installing Python 3.11 (this takes ~30 seconds)...
-    start /wait "" "%TEMP%\python_setup.exe" /passive InstallAllUsers=0 PrependPath=1 Include_pip=1
-    del "%TEMP%\python_setup.exe" 2>nul
+    :: Fallback to PowerShell
+    if not exist "%TEMP%\python_setup.exe" (
+        powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $wc = New-Object System.Net.WebClient; $wc.Headers.Add('User-Agent','Mozilla/5.0'); $wc.DownloadFile('https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe', '$env:TEMP\python_setup.exe')"
+    )
+    
+    :: If download failed, open browser directly to the download file
+    if not exist "%TEMP%\python_setup.exe" (
+        echo.
+        echo [!] Automatic background download was blocked by Windows security.
+        echo [*] Opening the official Python 3.11 download in your browser...
+        start https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
+        echo.
+        echo --------------------------------------------------------------------------
+        echo ACTION REQUIRED:
+        echo 1. Your browser will download: python-3.11.9-amd64.exe
+        echo 2. Run the downloaded file.
+        echo 3. VERY IMPORTANT: Check the box 'Add Python to PATH' at the bottom!
+        echo 4. Click 'Install Now' and wait for it to finish.
+        echo --------------------------------------------------------------------------
+        echo Once Python installation is finished, press any key to continue...
+        pause >nul
+    ) else (
+        echo [*] Installing Python 3.11 (this takes ~30 seconds)...
+        start /wait "" "%TEMP%\python_setup.exe" /passive InstallAllUsers=0 PrependPath=1 Include_pip=1
+        del "%TEMP%\python_setup.exe" 2>nul
+    )
     
     if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
         set "PY_CMD=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+    ) else if exist "%ProgramFiles%\Python311\python.exe" (
+        set "PY_CMD=%ProgramFiles%\Python311\python.exe"
     ) else (
         echo [OK] Python installed! Please close and re-run install_soundroom_pc.bat to continue.
         pause
@@ -72,7 +94,17 @@ if exist "%~dp0bin\ffmpeg.exe" (
 if "%HAS_FFMPEG%"=="0" (
     echo [!] FFmpeg not found. Downloading portable FFmpeg binaries into bin/...
     if not exist "%~dp0bin" mkdir "%~dp0bin"
-    powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $zip = '$env:TEMP\ffmpeg.zip'; (New-Object System.Net.WebClient).DownloadFile('https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip', $zip); Expand-Archive -Path $zip -DestinationPath '$env:TEMP\ffmpeg_extracted' -Force; Get-ChildItem -Path '$env:TEMP\ffmpeg_extracted' -Recurse -Filter 'ffmpeg.exe' | ForEach-Object { Copy-Item $_.FullName -Destination '%~dp0bin\ffmpeg.exe' }; Get-ChildItem -Path '$env:TEMP\ffmpeg_extracted' -Recurse -Filter 'ffprobe.exe' | ForEach-Object { Copy-Item $_.FullName -Destination '%~dp0bin\ffprobe.exe' }; Remove-Item $zip -Force -ErrorAction SilentlyContinue; Remove-Item '$env:TEMP\ffmpeg_extracted' -Recurse -Force -ErrorAction SilentlyContinue"
+    
+    where curl >nul 2>nul
+    if not errorlevel 1 (
+        curl.exe -fSL -o "%TEMP%\ffmpeg.zip" "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+    )
+    if not exist "%TEMP%\ffmpeg.zip" (
+        powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object System.Net.WebClient).DownloadFile('https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip', '$env:TEMP\ffmpeg.zip')"
+    )
+    if exist "%TEMP%\ffmpeg.zip" (
+        powershell -NoProfile -Command "Expand-Archive -Path '$env:TEMP\ffmpeg.zip' -DestinationPath '$env:TEMP\ffmpeg_extracted' -Force; Get-ChildItem -Path '$env:TEMP\ffmpeg_extracted' -Recurse -Filter 'ffmpeg.exe' | ForEach-Object { Copy-Item $_.FullName -Destination '%~dp0bin\ffmpeg.exe' }; Get-ChildItem -Path '$env:TEMP\ffmpeg_extracted' -Recurse -Filter 'ffprobe.exe' | ForEach-Object { Copy-Item $_.FullName -Destination '%~dp0bin\ffprobe.exe' }; Remove-Item '$env:TEMP\ffmpeg.zip' -Force -ErrorAction SilentlyContinue; Remove-Item '$env:TEMP\ffmpeg_extracted' -Recurse -Force -ErrorAction SilentlyContinue"
+    )
     if exist "%~dp0bin\ffmpeg.exe" (
         echo [OK] Portable FFmpeg downloaded and installed into bin/!
     ) else (
